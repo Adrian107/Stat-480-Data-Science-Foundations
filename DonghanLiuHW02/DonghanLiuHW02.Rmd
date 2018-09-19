@@ -1,0 +1,96 @@
+---
+title: "DonghanLiuHW02"
+author: "Donghan Liu, Donghan2"
+date: "2018/2/4"
+output:
+  html_document:
+    theme: readable
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(echo = TRUE,message = FALSE, warning = FALSE,root.dir = "~/Stat480/RDataScience/AirlineDelays")
+```
+
+#Solution
+
+##Exercise 1
+
+```{r}
+library(biganalytics)
+library(data.table)
+library(kableExtra)
+library(knitr)
+```
+
+```{r}
+data0708 = attach.big.matrix("air0708.desc")
+may0708 = data0708[data0708[,"Month"] == 5,]
+nodelay = c(rep(0,7))
+for (i in 1:7){
+  nodelay[i] = nrow(may0708[may0708[,'ArrDelay']<=0 & may0708[,'DayOfWeek']==i & may0708[,'DepDelay']<=0 & may0708[,'WeatherDelay']<=0 & may0708[,'Cancelled']<=0
+                             & may0708[,'LateAircraftDelay']<=0 & may0708[,'NASDelay']<=0 & may0708[,'SecurityDelay']<=0 & may0708[,'CarrierDelay']<=0 & may0708[,'Diverted']<=0,])
+}
+
+dayofweek = c('Mon','Tue', 'Wed', 'Thu','Fri', 'Sat', 'Sun')
+nodelaytable = data.frame(NumOfNoDelays = nodelay, DayOfWeek = dayofweek)
+
+kable_styling(kable(nodelaytable, format = "html", digits = 2), full_width = FALSE)
+
+
+plot(nodelay,type = 'o',main = 'No Any Kind of Delays Regarding Day of Week in 2007&2008',xlab = 'Day of Week',ylab = 'Number of Flight that No Any Kind of Delays')
+```
+
+According to the above plot, the Thursday has the most number in no any kind of dalay flights and it potentially would be the best day to travel. 
+
+
+##Exercise 2
+
+```{r}
+noarrdelay = c(rep(0,12))
+noarrdelayrate = c(rep(0,12))
+for (i in 1:12){
+  noarrdelay[i] = nrow(data0708[data0708[,'Month'] == i & data0708[,'ArrDelay'] <= 0,])
+  noarrdelayrate[i] = (nrow(data0708[data0708[,'Month'] == i & data0708[,'ArrDelay'] <= 0,])/nrow(data0708[data0708[,'Month'] == i,]))*100
+}
+monthofyear = c('Jan','Feb', 'Mar', 'Apr','May', 'June', 'July','Aug' ,'Sep','Oct','Nov','Dec')
+noarrdelaytable = data.frame(NumOfNoArrDelays = noarrdelay,RateofNoArrDelays_Percent = noarrdelayrate, MonthOfYear = monthofyear)
+
+kable_styling(kable(noarrdelaytable, format = "html", digits = 2), full_width = FALSE)
+
+par(mfrow = c(2, 1))
+plot(noarrdelay,type = 'o',main = 'No Arrival Delays Regarding Month of Year in 2007&2008',xlab = 'Month of Year',ylab = 'Number of Flight that No Arrival Delays')
+plot(noarrdelayrate,type = 'o',main = 'No Arrival Delays Percentage Regarding Month of Year in 2007&2008',xlab = 'Month of Year',ylab = 'Number of Flight that No Arrival Delays')
+```
+
+Regarding the above graph and table, the month of Sep has the highest number and rate of no delays, so other than May, Sep is a good option to travel based on avoiding the arrival delays.
+
+
+##Exercise 3
+
+```{r}
+arrdelay = data0708[,'ArrDelay']
+flightime = data0708[,'CRSElapsedTime']
+dist = data0708[,'Distance']
+
+#CRSElapsedTime
+fitarr = lm(arrdelay ~ flightime)
+summary(fitarr)
+```
+Based on the above summary table, we could see that the estimated paramater coefficient is 0.0047651 (positive relationship), the p-value is less than 2e-16, and the R_squared is 7.352-05, which represent the percentage that CRSElapsedTime could explain the arrival delays in 2007-2008
+
+```{r}
+#Distance
+fitdist = lm(arrdelay ~ dist)
+summary(fitdist)
+```
+As the above table shows, we could see that the estimated paramater coefficient is 1.453e-04 (week positive relationship), the p-value is 2.67e-15, and the R_squared is  4.423e-06, which represent the percentage that Distance could explain the arrival delays in 2007-2008.
+
+Overall, both of predictors are not the good predictors for the arrival delays, since the R_squared is relatively small. However, if we compare these two predictors, the model that predict arrival delays with CRSElapsedTime is better, since 1. the p-value of the CRSElapsedTime is lower, meaning that it is more significant 2. the model of CRSElapsedTime R_squared is larger, indicating that it explains more to the arrival delays.
+
+
+
+
+

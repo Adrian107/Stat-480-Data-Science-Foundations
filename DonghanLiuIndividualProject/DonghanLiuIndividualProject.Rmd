@@ -1,0 +1,456 @@
+---
+title: "DonghanLiuIndividualProject"
+author: "Liu, Donghan, Donghan2"
+date: "2018/2/23"
+output:
+  html_document:
+    theme: readable
+    toc: yes
+  word_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+```{r setup, include=FALSE, ,message = FALSE, warning = FALSE}
+knitr::opts_knit$set(echo = TRUE,message = FALSE, warning = FALSE,root.dir = "~/Stat480/RDataScience")
+```
+
+```{r,message = FALSE, warning = FALSE}
+# The following setup code is based on the code for Chapter 3 of 
+# 
+# Nolan, Deborah and Temple Lang, Duncan. Data Science in R: A Case Studies Approach to 
+# Computational Reasoning and Problem Solving. CRC Press, 2015. 
+# http://rdatasciencecases.org/
+
+# and may be useful for the spam detection exercises.
+
+# Set the working directory. This is where R will look for files and save files if a full path is not specified.
+setwd("~/Stat480/RDataScience/Chapter3")
+
+# Load data structures and define variables needed in examples.
+# Following code assumes you have created and stored emailXX.rda in 
+# the ~/Stat480/RDataScience/Chapter3 directory.
+
+load("emailXX.rda")
+indx = c(1:5, 15, 27, 68, 69, 329, 404, 427, 516, 852, 971)
+sampleStruct = emailStruct[ indx ]
+load("spamAssassinDerivedDF.rda")
+
+
+# From section 3.5.3 of the text book.
+library(tm)
+stopWords = stopwords()
+cleanSW = tolower(gsub("[[:punct:]0-9[:blank:]]+", " ", stopWords))
+SWords = unlist(strsplit(cleanSW, "[[:blank:]]+"))
+SWords = SWords[ nchar(SWords) > 1 ]
+stopWords = unique(SWords)
+
+# The following are the testing and training indices from Section 3.6.1.
+# Here we use the isSpam vector from the email data frame.
+# Determine number of spam and ham messages for sampling.
+numEmail = length(emailDF$isSpam)
+numSpam = sum(emailDF$isSpam)
+numHam = numEmail - numSpam
+
+# Set a particular seed, so the results will be reproducible.
+set.seed(418910)
+
+# Take approximately 1/3 of the spam and ham messages as our test spam and ham messages.
+testSpamIdx = sample(numSpam, size = floor(numSpam/3))
+testHamIdx = sample(numHam, size = floor(numHam/3))
+
+testIsSpam = rep(c(TRUE, FALSE), 
+                 c(length(testSpamIdx), length(testHamIdx)))
+trainIsSpam = rep(c(TRUE, FALSE), 
+                  c(numSpam - length(testSpamIdx), 
+                    numHam - length(testHamIdx)))
+
+# Use cleanText and findMsgWords functions from the text to help with processing 
+cleanText =
+  function(msg)   {
+    tolower(gsub("[[:punct:]0-9[:space:][:blank:]]+", " ", msg))
+  }
+
+findMsgWords = 
+  function(msg, stopWords) {
+    if(is.null(msg))
+      return(character())
+    
+    words = unique(unlist(strsplit(cleanText(msg), "[[:blank:]\t]+")))
+    
+    # drop empty and 1 letter words
+    words = words[ nchar(words) > 1]
+    words = words[ !( words %in% stopWords) ]
+    invisible(words)
+  }
+
+
+# Get the message word lists.
+isSpam=sapply(emailStruct, function(xx)xx$isSpam)
+msgWordsList = lapply(emailStruct, 
+                      function(msg){findMsgWords(msg$body, stopWords=stopWords)})
+testMsgWords = c((msgWordsList[isSpam])[testSpamIdx],
+                 (msgWordsList[!isSpam])[testHamIdx] )
+trainMsgWords = c((msgWordsList[isSpam])[ - testSpamIdx], 
+                  (msgWordsList[!isSpam])[ - testHamIdx])
+
+##################################################################################################
+```
+#Solution
+
+##Exercise 1
+
+###Setup the datasets
+
+cd ~/Stat480/RDataScience/AirlineDelays
+
+vi combinescript
+
+cp 2000.csv AirlineData2000s.csv
+      for year in {2000..2008}
+          do
+          tail -n+2 $year.csv >>AirlineData2000s.csv
+done
+
+./combinescript
+
+```{r,eval=FALSE,message = FALSE, warning = FALSE}
+library(biganalytics)
+setwd("~/Stat480/RDataScience/AirlineDelays")
+air2000s <- read.big.matrix("AirlineData2000s.csv", header = TRUE, 
+                     backingfile = "air2000s.bin",
+                     descriptorfile = "air2000s.desc",
+                     type = "integer", extraCols = "age")
+```
+
+###Number of Flights Per Year
+```{r,message = FALSE, warning = FALSE}
+library(biganalytics)
+setwd("~/Stat480/RDataScience/AirlineDelays")
+airData2000s = attach.big.matrix("air2000s.desc")
+year = c()
+for (i in 2000:2008) 
+  year =  c(year, sum(airData2000s[,"Year"] == i))
+year
+
+  plot(x = 2000:2008, y = year, type = 'o', main = 'Number of Flights in Each Year', xlab = 'Year', ylab = 'Number of Flights')
+```
+
+From the plot above, we could see that the difference of number of flights between 2000 and other eight years are obvious. There is a huge decreasing from 2000 to 2002, and then the number of flights are approximately stay in the floating level. 
+
+###Annual Cancellation Rates by Years
+```{r}
+yr_cancel = c()
+for (i in 2000:2008){
+  yr_cancel = c(yr_cancel, (sum(airData2000s[,"Cancelled"] * airData2000s[,"Year"] == i)/sum(airData2000s[,"Year"] == i)))
+}
+plot(x = 2000:2008, y = yr_cancel, type = 'o', xlab = 'Year', ylab = 'Cancellation Ratio', main = 'Cancellation Ratio vs Year')
+```
+
+From the annual cancellation ratio that shown above, it states that the ratios in 2000 and 2001 are clearly higher than other eight years, and there is a small increasing between 2000 and 2001 and a big gap between 2001 and 2002. The ratio from 2002 to 2008 is relatively stable and increased slightly. 
+
+###Monthly Cancellation Rates by Year
+```{r}
+yr_cancel_by_month = function(year){
+  month_cancel = c()
+  for (i in 1:12){
+    month_cancel = c(month_cancel, (sum((airData2000s[,"Cancelled"] * airData2000s[,"Month"] == i) & airData2000s[,"Year"] == year)/sum(airData2000s[,"Month"] == i & airData2000s[,"Year"] == year)))
+  }
+  return (month_cancel)
+}
+
+data_cancel = list(yr_cancel_by_month(2000),
+yr_cancel_by_month(2001),
+yr_cancel_by_month(2002),
+yr_cancel_by_month(2003),
+yr_cancel_by_month(2004),
+yr_cancel_by_month(2005),
+yr_cancel_by_month(2006),
+yr_cancel_by_month(2007),
+yr_cancel_by_month(2008))
+
+dat <- matrix(unlist(data_cancel), ncol = 9, byrow = FALSE)
+matplot(dat, type = c("b"),pch=1,col = 1:9, xlab = 'Month', ylab = 'Cancellation Rates', main = 'Cancellation Rates vs Months From 2000 to 2008') #plot
+legend("topleft", legend = 2000:2008, col=1:9, pch=1, horiz = TRUE, cex = 0.6) # optional legend
+```
+
+The above plot shows that most of years have a general flat trend, but not exactly. Besides the most easily observed month, which is Sep in 2001 (911 perhaps), the season of Winter(1,2,12) has relatively high cancellation rate. After Feb, the cancellation rates starts to decrease until May, which has the relatively lowest rate as well as Nov. From May, the general flow begins incresing. Plus, the overall flow is getting lower between Aug and Nov. 
+
+##Exercise 2
+
+From an intutional view, there is no correlation between years and cancellation rate because the plot does not have the general correlated trend.
+
+```{r}
+yr = 2000:2008
+yr_cancel_perc = yr_cancel*100
+fit = lm(yr_cancel_perc ~ yr)
+summary(fit)
+par(mfrow = c(2,2))
+plot(fit)
+```
+
+From the summary table, the p-value for year is 0.179, which is larger than the significant cut off, 0.05, thus, there is no significant relationship between years and cancellation percentage. Plus, the variation in cancellation rate that explained by an annual trend is 0.2416. Moreover, from the diagnostic plot, the residuals is not constant since the residuals line is not flat. There are three points that was highlighted in the Normal Q-Q plot, which indicates that it might not lie on the general of the qq line. The assumption of homoscedasticity is fail since the horizontal line does not equally (randomly) spread points and there is some points are highlighted, so they potentially are the outliers.
+
+###Reasonable model
+```{r}
+yr1 = 2003:2008
+fit1 = lm(yr_cancel_perc[4:9] ~ yr1)
+summary(fit1)
+par(mfrow = c(2,2))
+plot(fit1)
+```
+
+By fitting the more reasonable model, we could observe that the variation in cancellation rate that explained by an annual trend (2003-2008) increased to 0.5714. Even though the P-value is still larger than the cur-off value (no significant relationship), but the residuals plot and scale-location plot look much better than the previous full year model. And there are still some outliers that emphaized by Normal Q-Q plot and Residuals vs Leverage. 
+
+##Exercise 3
+
+```{r}
+data = emailDF
+data$perHTML[data$perHTML == 0] = 1
+data$perCaps[data$perCaps == 0] = 1
+data = cbind(data, ceiling(data$perCaps))
+data = cbind(data, ceiling(data$perHTML))
+names(data)[ncol(data)] = 'html_bin'
+names(data)[ncol(data)-1] = 'cap_bin'
+
+
+#Split the data with balanced Spam and ham in train(2/3) and test(1/3) data
+isSpamDF = data[data$isSpam==TRUE,]
+isHamDF = data[data$isSpam==FALSE,]
+
+spamDF_index  = sample(nrow(isSpamDF), size = trunc((2/3) * nrow(isSpamDF)))
+hamDF_index = sample(nrow(isHamDF), size = trunc((2/3) * nrow(isHamDF)))
+
+trn_DF = rbind(isSpamDF[spamDF_index, ], isHamDF[hamDF_index,])
+tst_DF = rbind(isSpamDF[-spamDF_index, ], isHamDF[-hamDF_index,])
+
+#Compute LLR
+computeLLR = function(data)
+  {
+  p_spam = (sum(data$isSpam)/nrow(data))*100
+  p_ham = 100 - p_spam
+  p_cap = p_html = c()
+  p_cap_spam = p_html_spam = c()
+  p_cap_ham = p_html_ham = c()
+  for (i in 1:100){
+    p_cap[i] = (sum(ceiling(data$perCaps)==i)+0.5)/(length(data$perCaps)+0.5)
+    
+    p_html[i] = (sum(ceiling(data$perHTML)==i)+0.5)/(length(data$perHTML)+0.5)
+    
+    p_cap_spam[i] = (sum(ceiling(data$perCaps[data$isSpam == TRUE])==i)+0.5)/(length(data$perCaps[data$isSpam == TRUE])+0.5)
+    
+    p_cap_ham[i] = (sum(ceiling(data$perCaps[data$isSpam == FALSE])==i)+0.5)/(length(data$perCaps[data$isSpam == FALSE])+0.5)
+    
+    p_html_spam[i] = (sum(ceiling(data$perHTML[data$isSpam == TRUE])==i)+0.5)/(length(data$perHTML[data$isSpam == TRUE])+0.5)
+    
+    p_html_ham[i] = (sum(ceiling(data$perHTML[data$isSpam == FALSE])==i)+0.5)/(length(data$perHTML[data$isSpam == FALSE])+0.5)
+  }
+
+  return (list(log(p_cap_spam) - log(p_cap_ham),log(p_html_spam) - log(p_html_ham)))
+}
+
+llr = computeLLR(trn_DF)
+
+x = c()
+for (i in 1:nrow(tst_DF)){
+  x = c(x, unlist(llr[1])[tst_DF$cap_bin[i]]+ unlist(llr[2])[tst_DF$html_bin[i]])
+}
+```
+
+The function ComputeLLR() basiclly use the basis that provided in the assignment instruction. By the basis formula, I get the derived formula that implemented above. Also the function is directly calculate the LLR, which is relatively more efficient to have the LLR value. +0.5 is for the case that the value is zero and will cause the NA value or calculation error. In order to have the calculated LLR value validated, I use the tst_DF(index) to extract the bin. 
+
+
+```{r}
+#Type I and type II error
+typeIIErrorRates = function(llrVals, isSpam) {
+  o = order(llrVals)
+  llrVals =  llrVals[o]
+  isSpam = isSpam[o]
+  idx = which(isSpam)
+  N = length(idx)
+  list(error = (1:(N))/N, values = llrVals[idx])
+}  
+
+typeIErrorRates = function(llrVals, isSpam) 
+  {
+    # order the llr values and spam indicators
+    o = order(llrVals)
+    llrVals =  llrVals[o]
+    isSpam = isSpam[o]
+    
+    # get indices for ham 
+    idx = which(!isSpam)
+    N = length(idx)
+    # get the error rates and llr values for the ham indices
+    list(error = (N:1)/N, values = llrVals[idx])
+  }
+
+x1 = typeIErrorRates(x, tst_DF$isSpam)
+x2 = typeIIErrorRates(x, tst_DF$isSpam)
+tau01 = min(x1$values[x1$error <= 0.05])
+t2 = max(x2$error[ x2$values < tau01 ])
+##probaly trash
+type2 = max(x1$error[ x2$values < tau01 ])
+type1 = min(x1$error[x1$values == min(x1$values[x1$error <= 0.05])])
+
+
+#Plot
+library(RColorBrewer)
+cols = brewer.pal(9, "Set1")[c(3, 4, 5)]
+plot(x2$error ~ x2$values,  type = "l", col = cols[1], lwd = 3,
+     xlab = "Log Likelihood Ratio Values", ylab="Error Rate")
+
+points(x1$error ~ x1$values, type = "l", col = cols[2], lwd = 3)
+legend(x = 0, y = 1, fill = c(cols[2], cols[1]),
+       legend = c("Classify Ham as Spam", 
+                  "Classify Spam as Ham"), cex = 0.8,
+       bty = "n")
+abline(h=0.01, col ="grey", lwd = 3, lty = 2)
+text(tau01, 0.1, pos = 4, paste("Type I Error = ", round(type1, digits = 4)), col = cols[2])
+
+mtext(tau01, side = 1, line = 0.5, at = tau01, col = cols[3])
+segments(x0 = tau01, y0 = -.50, x1 = tau01, y1 = t2, 
+         lwd = 2, col = "grey")
+text(tau01 + 0.1, 0.5, pos = 4,
+     paste("Type II Error = ", round(t2, digits = 3)), 
+     col = cols[1])
+
+```
+
+From the plot above, the potential best threhold is 0.8847 and the corresponding error is type I: 0.0432, and type II: 0.499 with the siginificant level of 0.05. 
+
+
+
+##Exercise 4
+
+```{r}
+library(rpart)
+
+# Function to replace logical variables with factor variables
+setupRpart = function(data) {
+  logicalVars = which(sapply(data, is.logical))
+  facVars = lapply(data[ , logicalVars], 
+                   function(x) {
+                     x = as.factor(x)
+                     levels(x) = c("F", "T")
+                     x
+                   })
+  cbind(facVars, data[ , - logicalVars])
+}
+
+# Process the email data frame.
+emailDFrp = setupRpart(emailDF)
+class(emailDFrp)
+# Get spam and ham indices. These are the same samples chosen in section 3.6.1.
+set.seed(418910)
+testSpamIdx = sample(numSpam, size = floor(numSpam/3))
+testHamIdx = sample(numHam, size = floor(numHam/3))
+
+testDF = 
+  rbind( emailDFrp[ emailDFrp$isSpam == "T", ][testSpamIdx, ],
+         emailDFrp[emailDFrp$isSpam == "F", ][testHamIdx, ] )
+trainDF =
+  rbind( emailDFrp[emailDFrp$isSpam == "T", ][-testSpamIdx, ], 
+         emailDFrp[emailDFrp$isSpam == "F", ][-testHamIdx, ])
+
+
+
+
+# #Fit the model with the data from the easy_ham2 directory
+rpartFit = rpart(isSpam ~ ., data = trainDF, method = "class")
+rpartFit$variable.importance
+predictions = predict(rpartFit, 
+                      newdata = testDF[, names(testDF) != "isSpam"],
+                      type = "class")
+
+# See predictions for known ham.
+predsForHam = predictions[ testDF$isSpam == "F" ]
+
+
+# Obtain the Type I error rate.
+type1_full = sum(predsForHam == "T") / length(predsForHam)
+
+# Obtain the Type II error rate.
+predsForSpam = predictions[ testDF$isSpam == "T" ]
+type2_full = sum(predsForSpam == "F") / length(predsForSpam)
+
+
+
+
+#Fit the model without the data from the easy_ham2 directory
+emailDF1 = emailDF
+emailDF2 = emailDF1[-which(grepl("~/Stat480/RDataScience/SpamAssassinMessages/messages/easy_ham_2",rownames(emailDF1))),]
+emailDF_no_easy_ham_2 = setupRpart(emailDF2)
+
+set.seed(418910)
+numSpam2 = sum(emailDF_no_easy_ham_2$isSpam == 'T')
+numHam2 = length(emailDF_no_easy_ham_2$isSpam) - numSpam2
+
+testSpamIdx = sample(numSpam2, size = floor(numSpam2/3))
+testHamIdx = sample(numHam2, size = floor(numHam2/3))
+
+testDF2 = 
+  rbind( emailDF_no_easy_ham_2[emailDF_no_easy_ham_2$isSpam == "T", ][testSpamIdx, ],
+         emailDF_no_easy_ham_2[emailDF_no_easy_ham_2$isSpam == "F", ][testHamIdx, ] )
+trainDF2 =
+  rbind( emailDF_no_easy_ham_2[emailDF_no_easy_ham_2$isSpam == "T", ][-testSpamIdx, ], 
+         emailDF_no_easy_ham_2[emailDF_no_easy_ham_2$isSpam == "F", ][-testHamIdx, ])
+
+
+rpartFit_no2 = rpart(isSpam ~ ., data = trainDF2, method = "class")
+rpartFit_no2$variable.importance
+
+predictions = predict(rpartFit_no2, 
+                      newdata = testDF2[, names(testDF2) != "isSpam"],
+                      type = "class")
+
+# See predictions for known ham.
+predsForHam = predictions[ testDF2$isSpam == "F" ]
+
+# Obtain the Type I error rate.
+type1_no2_reduce = sum(predsForHam == "T") / length(predsForHam)
+
+# Obtain the Type II error rate.
+predsForSpam = predictions[ testDF2$isSpam == "T" ]
+type2_no2_reduce = sum(predsForSpam == "F") / length(predsForSpam)
+
+
+
+
+predictions = predict(rpartFit_no2, 
+                      newdata = testDF[, names(testDF) != "isSpam"],
+                      type = "class")
+
+# See predictions for known ham.
+predsForHam = predictions[ testDF$isSpam == "F" ]
+
+# Obtain the Type I error rate.
+type1_no2_full = sum(predsForHam == "T") / length(predsForHam)
+
+# Obtain the Type II error rate.
+predsForSpam = predictions[ testDF$isSpam == "T" ]
+type2_no2_full = sum(predsForSpam == "F") / length(predsForSpam)
+
+Type1 = c(type1_full,type1_no2_reduce,type1_no2_full)
+Type2 = c(type2_full,type2_no2_reduce,type2_no2_full)
+
+results = data.frame(Type1,Type2)
+
+row.names(results) = c('Full Model','Reduced model with reduced test data', 'Reduced model with full test data')
+
+library(knitr)
+library(kableExtra)
+kable_styling(kable(results, format = "html", digits = 4), full_width = FALSE)
+```
+
+From the comparison between model without easy_ham2 and model with easy_ham2, from first to fourth important feature for both model, they have same most important classification features. The first different most important classification features is forwards(with easy_ham2) and numDlr(without easy_ham2), which is located at fifth of the importance list. From fifth position of the importance feature list, the rest of feature does not have same order and value.
+
+As we see from the table, the full model (has full data and test data) has the lowest type I error but the reduced model with reduced test data and full test data has the pretty similar type II error. The reason caused this situation potentially be the removal of dataset will affect the accuracy of the classification, in this case, with getting rid of easy_ham_2, the number of ham might be deducted signficantly, and it turns out to be harder to predict the classficiation with less data, so the error of classify Ham as Spam increased, whereas, with the trade-off theory, the error of classify Spam as Ham decreased in a great amount. 
+
+
+
+
+
+
+
+

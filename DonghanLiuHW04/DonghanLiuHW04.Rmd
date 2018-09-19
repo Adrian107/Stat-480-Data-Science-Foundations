@@ -1,0 +1,661 @@
+---
+title: "DonghanLiuHW04"
+author: "Donghan Liu, Donghan2"
+date: "2/18/2018"
+output:
+  html_document:
+    theme: readable
+    toc: yes
+  word_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(echo = TRUE,message = FALSE, warning = FALSE,root.dir = "~/Stat480/RDataScience/Chapter3")
+```
+
+```{r, message = FALSE, warning = FALSE,echo = FALSE}
+# The following setup code is based on the code for Chapter 3 of 
+# 
+# Nolan, Deborah and Temple Lang, Duncan. Data Science in R: A Case Studies Approach to 
+# Computational Reasoning and Problem Solving. CRC Press, 2015. 
+# http://rdatasciencecases.org/
+
+
+# Following lines from sections 3.3 through 3.5.4 of the text are needed as setup for Exercise 2
+spamPath = "~/Stat480/RDataScience/SpamAssassinMessages"
+
+dirNames = list.files(path = paste(spamPath, "messages", 
+                                   sep = .Platform$file.sep))
+fullDirNames = paste(spamPath, "messages", dirNames, 
+                     sep = .Platform$file.sep)
+
+indx = c(1:5, 15, 27, 68, 69, 329, 404, 427, 516, 852, 971)
+fn = list.files(fullDirNames[1], full.names = TRUE)[indx]
+sampleEmail = sapply(fn, readLines)
+
+splitMessage = function(msg) {
+  splitPoint = match("", msg)
+  header = msg[1:(splitPoint-1)]
+  body = msg[ -(1:splitPoint) ]
+  return(list(header = header, body = body))
+}
+
+sampleSplit = lapply(sampleEmail, splitMessage)
+
+getBoundary = function(header) {
+  boundaryIdx = grep("boundary=", header)
+  boundary = gsub('"', "", header[boundaryIdx])
+  gsub(".*boundary= *([^;]*);?.*", "\\1", boundary)
+}
+
+dropAttach = function(body, boundary){
+  
+  bString = paste("--", boundary, sep = "")
+  bStringLocs = which(bString == body)
+  
+  # if there are fewer than 2 beginning boundary strings, 
+  # there is on attachment to drop
+  if (length(bStringLocs) <= 1) return(body)
+  
+  # do ending string processing
+  eString = paste("--", boundary, "--", sep = "")
+  eStringLoc = which(eString == body)
+  
+  # if no ending boundary string, grab contents between the first 
+  # two beginning boundary strings as the message body
+  if (length(eStringLoc) == 0) 
+    return(body[ (bStringLocs[1] + 1) : (bStringLocs[2] - 1)])
+  
+  # typical case of well-formed email with attachments
+  # grab contents between first two beginning boundary strings and 
+  # add lines after ending boundary string
+  n = length(body)
+  if (eStringLoc < n) 
+    return( body[ c( (bStringLocs[1] + 1) : (bStringLocs[2] - 1), 
+                     ( (eStringLoc + 1) : n )) ] )
+  
+  # fall through case
+  # note that the result is the same as the 
+  # length(eStringLoc) == 0 case, so code could be simplified by 
+  # dropping that case and modifying the eStringLoc < n check to 
+  # be 0 < eStringLoc < n
+  return( body[ (bStringLocs[1] + 1) : (bStringLocs[2] - 1) ])
+}
+
+library(tm)
+stopWords = stopwords()
+cleanSW = tolower(gsub("[[:punct:]0-9[:blank:]]+", " ", stopWords))
+SWords = unlist(strsplit(cleanSW, "[[:blank:]]+"))
+SWords = SWords[ nchar(SWords) > 1 ]
+stopWords = unique(SWords)
+
+cleanText =
+  function(msg)   {
+    tolower(gsub("[[:punct:]0-9[:space:][:blank:]]+", " ", msg))
+  }
+
+findMsgWords = 
+  function(msg, stopWords) {
+    if(is.null(msg))
+      return(character())
+    
+    words = unique(unlist(strsplit(cleanText(msg), "[[:blank:]\t]+")))
+    
+    # drop empty and 1 letter words
+    words = words[ nchar(words) > 1]
+    words = words[ !( words %in% stopWords) ]
+    invisible(words)
+  }
+
+processAllWords = function(dirName, stopWords)
+{
+  # read all files in the directory
+  fileNames = list.files(dirName, full.names = TRUE)
+  # drop files that are not email, i.e., cmds
+  notEmail = grep("cmds$", fileNames)
+  if ( length(notEmail) > 0) fileNames = fileNames[ - notEmail ]
+  
+  messages = lapply(fileNames, readLines, encoding = "latin1")
+  
+  # split header and body
+  emailSplit = lapply(messages, splitMessage)
+  # put body and header in own lists
+  bodyList = lapply(emailSplit, function(msg) msg$body)
+  headerList = lapply(emailSplit, function(msg) msg$header)
+  rm(emailSplit)
+  
+  # determine which messages have attachments
+  hasAttach = sapply(headerList, function(header) {
+    CTloc = grep("Content-Type", header)
+    if (length(CTloc) == 0) return(0)
+    multi = grep("multi", tolower(header[CTloc])) 
+    if (length(multi) == 0) return(0)
+    multi
+  })
+  
+  hasAttach = which(hasAttach > 0)
+  
+  # find boundary strings for messages with attachments
+  boundaries = sapply(headerList[hasAttach], getBoundary)
+  
+  # drop attachments from message body
+  bodyList[hasAttach] = mapply(dropAttach, bodyList[hasAttach], 
+                               boundaries, SIMPLIFY = FALSE)
+  
+  # extract words from body
+  msgWordsList = lapply(bodyList, findMsgWords, stopWords)
+  
+  invisible(msgWordsList)
+}
+
+msgWordsList = lapply(fullDirNames, processAllWords, 
+                      stopWords = stopWords) 
+msgWordsList = unlist(msgWordsList, recursive = FALSE)
+
+
+# Set working directory
+setwd("~/Stat480/RDataScience/Chapter3")
+
+# Load data structures and define variables and function needed in examples.
+# Note that emailXX.rda is created in the section 3.8 code and spamAssassinDerivedDF.rda is created in the 
+# section 3.9 setup code. If those files do not already exist, they will need to be created with the code from those
+# respective sections.
+# These are needed for Exercises 1, 3, and 4.
+load("emailXX.rda")
+indx = c(1:5, 15, 27, 68, 69, 329, 404, 427, 516, 852, 971)
+sampleStruct = emailStruct[ indx ]
+load("spamAssassinDerivedDF.rda")
+
+
+##############################################################################################################
+
+
+```
+
+```{r,echo = FALSE}
+fun = list(
+  isSpam =
+    expression(msg$isSpam)
+  ,
+  isRe =
+    function(msg) {
+      # Can have a Fwd: Re:  ... but we are not looking for this here.
+      # We may want to look at In-Reply-To field.
+      "Subject" %in% names(msg$header) && 
+        length(grep("^[ \t]*Re:", msg$header[["Subject"]])) > 0
+    }
+  ,
+  numLines =
+    function(msg) length(msg$body)
+  ,
+  bodyCharCt =
+    function(msg)
+      sum(nchar(msg$body))
+  ,
+  underscore =
+    function(msg) {
+      if(!"Reply-To" %in% names(msg$header))
+        return(FALSE)
+      
+      txt <- msg$header[["Reply-To"]]
+      length(grep("_", txt)) > 0  && 
+        length(grep("[0-9A-Za-z]+", txt)) > 0
+    }
+  ,
+  subExcCt = 
+    function(msg) {
+      x = msg$header["Subject"]
+      if(is.na(x))
+        return(NA)
+      
+      sum(nchar(gsub("[^!]","", x)))
+    }
+  ,
+  subQuesCt =
+    function(msg) {
+      x = msg$header["Subject"]
+      if(is.na(x))
+        return(NA)
+      
+      sum(nchar(gsub("[^?]","", x)))
+    }
+  ,
+  numAtt = 
+    function(msg) {
+      if (is.null(msg$attach)) return(0)
+      else nrow(msg$attach)
+    }
+  
+  ,
+  priority =
+    function(msg) {
+      ans <- FALSE
+      # Look for names X-Priority, Priority, X-Msmail-Priority
+      # Look for high any where in the value
+      ind = grep("priority", tolower(names(msg$header)))
+      if (length(ind) > 0)  {
+        ans <- length(grep("high", tolower(msg$header[ind]))) >0
+      }
+      ans
+    }
+  ,
+  numRec =
+    function(msg) {
+      # unique or not.
+      els = getMessageRecipients(msg$header)
+      
+      if(length(els) == 0)
+        return(NA)
+      
+      # Split each line by ","  and in each of these elements, look for
+      # the @ sign. This handles
+      tmp = sapply(strsplit(els, ","), function(x) grep("@", x))
+      sum(sapply(tmp, length))
+    }
+  ,
+  perCaps =
+    function(msg)
+    {
+      body = paste(msg$body, collapse = "")
+      
+      # Return NA if the body of the message is "empty"
+      if(length(body) == 0 || nchar(body) == 0) return(NA)
+      
+      # Eliminate non-alpha characters and empty lines 
+      body = gsub("[^[:alpha:]]", "", body)
+      els = unlist(strsplit(body, ""))
+      ctCap = sum(els %in% LETTERS)
+      100 * ctCap / length(els)
+    }
+  ,
+  isInReplyTo =
+    function(msg)
+    {
+      "In-Reply-To" %in% names(msg$header)
+    }
+  ,
+  sortedRec =
+    function(msg)
+    {
+      ids = getMessageRecipients(msg$header)
+      all(sort(ids) == ids)
+    }
+  ,
+  subPunc =
+    function(msg)
+    {
+      if("Subject" %in% names(msg$header)) {
+        el = gsub("['/.:@-]", "", msg$header["Subject"])
+        length(grep("[A-Za-z][[:punct:]]+[A-Za-z]", el)) > 0
+      }
+      else
+        FALSE
+    },
+  hour =
+    function(msg)
+    {
+      date = msg$header["Date"]
+      if ( is.null(date) ) return(NA)
+      # Need to handle that there may be only one digit in the hour
+      locate = regexpr("[0-2]?[0-9]:[0-5][0-9]:[0-5][0-9]", date)
+      
+      if (locate < 0)
+        locate = regexpr("[0-2]?[0-9]:[0-5][0-9]", date)
+      if (locate < 0) return(NA)
+      
+      hour = substring(date, locate, locate+1)
+      hour = as.numeric(gsub(":", "", hour))
+      
+      locate = regexpr("PM", date)
+      if (locate > 0) hour = hour + 12
+      
+      locate = regexpr("[+-][0-2][0-9]00", date)
+      if (locate < 0) offset = 0
+      else offset = as.numeric(substring(date, locate, locate + 2))
+      (hour - offset) %% 24
+    }
+  ,
+  multipartText =
+    function(msg)
+    {
+      if (is.null(msg$attach)) return(FALSE)
+      numAtt = nrow(msg$attach)
+      
+      types = 
+        length(grep("(html|plain|text)", msg$attach$aType)) > (numAtt/2)
+    }
+  ,
+  hasImages =
+    function(msg)
+    {
+      if (is.null(msg$attach)) return(FALSE)
+      
+      length(grep("^ *image", tolower(msg$attach$aType))) > 0
+    }
+  ,
+  isPGPsigned =
+    function(msg)
+    {
+      if (is.null(msg$attach)) return(FALSE)
+      
+      length(grep("pgp", tolower(msg$attach$aType))) > 0
+    },
+  perHTML =
+    function(msg)
+    {
+      if(! ("Content-Type" %in% names(msg$header))) return(0)
+      
+      el = tolower(msg$header["Content-Type"]) 
+      if (length(grep("html", el)) == 0) return(0)
+      
+      els = gsub("[[:space:]]", "", msg$body)
+      totchar = sum(nchar(els))
+      totplain = sum(nchar(gsub("<[^<]+>", "", els )))
+      100 * (totchar - totplain)/totchar
+    },
+  subSpamWords =
+    function(msg)
+    {
+      if("Subject" %in% names(msg$header))
+        length(grep(paste(SpamCheckWords, collapse = "|"), 
+                    tolower(msg$header["Subject"]))) > 0
+      else
+        NA
+    }
+  ,
+  subBlanks =
+    function(msg)
+    {
+      if("Subject" %in% names(msg$header)) {
+        x = msg$header["Subject"]
+        # should we count blank subject line as 0 or 1 or NA?
+        if (nchar(x) == 1) return(0)
+        else 100 *(1 - (nchar(gsub("[[:blank:]]", "", x))/nchar(x)))
+      } else NA
+    }
+  ,
+  noHost =
+    function(msg)
+    {
+      # Or use partial matching.
+      idx = pmatch("Message-", names(msg$header))
+      
+      if(is.na(idx)) return(NA)
+      
+      tmp = msg$header[idx]
+      return(length(grep(".*@[^[:space:]]+", tmp)) ==  0)
+    }
+  ,
+  numEnd =
+    function(msg)
+    {
+      # If we just do a grep("[0-9]@",  )
+      # we get matches on messages that have a From something like
+      # " \"marty66@aol.com\" <synjan@ecis.com>"
+      # and the marty66 is the "user's name" not the login
+      # So we can be more precise if we want.
+      x = names(msg$header)
+      if ( !( "From" %in% x) ) return(NA)
+      login = gsub("^.*<", "", msg$header["From"])
+      if ( is.null(login) ) 
+        login = gsub("^.*<", "", msg$header["X-From"])
+      if ( is.null(login) ) return(NA)
+      login = strsplit(login, "@")[[1]][1]
+      length(grep("[0-9]+$", login)) > 0
+    },
+  isYelling =
+    function(msg)
+    {
+      if ( "Subject" %in% names(msg$header) ) {
+        el = gsub("[^[:alpha:]]", "", msg$header["Subject"])
+        if (nchar(el) > 0) nchar(gsub("[A-Z]", "", el)) < 1
+        else FALSE
+      }
+      else
+        NA
+    },
+  forwards =
+    function(msg)
+    {
+      x = msg$body
+      if(length(x) == 0 || sum(nchar(x)) == 0)
+        return(NA)
+      
+      ans = length(grep("^[[:space:]]*>", x))
+      100 * ans / length(x)
+    },
+  isOrigMsg =
+    function(msg)
+    {
+      x = msg$body
+      if(length(x) == 0) return(NA)
+      
+      length(grep("^[^[:alpha:]]*original[^[:alpha:]]+message[^[:alpha:]]*$", 
+                  tolower(x) ) ) > 0
+    },
+  isDear =
+    function(msg)
+    {
+      x = msg$body
+      if(length(x) == 0) return(NA)
+      
+      length(grep("^[[:blank:]]*dear +(sir|madam)\\>", 
+                  tolower(x))) > 0
+    },
+  isWrote =
+    function(msg)
+    {
+      x = msg$body
+      if(length(x) == 0) return(NA)
+      
+      length(grep("(wrote|schrieb|ecrit|escribe):", tolower(x) )) > 0
+    },
+  avgWordLen =
+    function(msg)
+    {
+      txt = paste(msg$body, collapse = " ")
+      if(length(txt) == 0 || sum(nchar(txt)) == 0) return(0)
+      
+      txt = gsub("[^[:alpha:]]", " ", txt)
+      words = unlist(strsplit(txt, "[[:blank:]]+"))
+      wordLens = nchar(words)
+      mean(wordLens[ wordLens > 0 ])
+    }
+  ,
+  numDlr =
+    function(msg)
+    {
+      x = paste(msg$body, collapse = "")
+      if(length(x) == 0 || sum(nchar(x)) == 0)
+        return(NA)
+      
+      nchar(gsub("[^$]","", x))
+    }
+)
+SpamCheckWords =
+  c("viagra", "pounds", "free", "weight", "guarantee", "million", 
+    "dollars", "credit", "risk", "prescription", "generic", "drug",
+    "financial", "save", "dollar", "erotic", "million", "barrister",
+    "beneficiary", "easy", 
+    "money back", "money", "credit card")
+
+
+getMessageRecipients =
+  function(header)
+  {
+    c(if("To" %in% names(header))  header[["To"]] else character(0),
+      if("Cc" %in% names(header))  header[["Cc"]] else character(0),
+      if("Bcc" %in% names(header)) header[["Bcc"]] else character(0)
+    )
+  }
+```
+
+#Exercise 1
+```{r}
+funcList = c(fun,VowelPerc =
+  function(msg)
+  {
+    txt = paste(msg$body, collapse = "")
+    txt = gsub("[^[:alpha:]]","",txt)
+    txt = tolower(txt)
+    txt = strsplit(txt,'')
+    if(length(txt) == 0 || sum(nchar(txt)) == 0) {return(NA)}
+    words = unlist(txt)
+    n = 0
+    for (i in words){
+      if (i == 'a' || i == 'e' || i == 'i' || i == 'o' || i == 'u'){
+        n = n + 1
+      }
+    }
+    wordLens = sum(nchar(words))
+    (n/wordLens)*100
+  })
+
+createDerivedDF =
+  function(email = emailStruct, operations = funcList, 
+           verbose = FALSE)
+  {
+    els = lapply(names(operations),
+                 function(id) {
+                   if(verbose) print(id)
+                   e = operations[[id]]
+                   v = if(is.function(e)) 
+                     sapply(email, e)
+                   else 
+                     sapply(email, function(msg) eval(e))
+                   v
+                 })
+    
+    df = as.data.frame(els)
+    names(df) = names(operations)
+    invisible(df)
+  }
+emailDF = createDerivedDF(emailStruct)
+
+sampleDF = createDerivedDF(sampleStruct)
+sampleDF$VowelPerc
+emailDF$VowelPerc[is.na(emailDF$VowelPerc)==TRUE]  # Check NA existance; None
+emailDF$VowelPerc[emailDF$VowelPerc>100 || emailDF$VowelPerc<0] #Check unreasonable value; None
+
+spam = subset(emailDF, isSpam == TRUE)
+ham = subset(emailDF, isSpam == FALSE)
+
+(spam_min=min(spam$VowelPerc)) #Min percentage for Spam 6.667%
+(spam_max=max(spam$VowelPerc)) #Max percentage for Spam 45.54%
+(ham_min=min(ham$VowelPerc)) #Min percentage for Ham 19.28%
+(ham_max=max(ham$VowelPerc)) #Max percentage for Ham 43.06%
+
+boxplot(ham$VowelPerc,spam$VowelPerc, main = 'Percent of Vowels Letter Comparison of Ham and Spam',
+        names=c('Ham','Spam'), ylab = 'Percent of Vowels')
+```
+
+From the boxplot shown above, the difference between ham and spam is not significant, either based on the mean difference or the range difference. Also, there is no significantly different in space between these two boxplots, and big portion of these two boxplots is overlapping. Thus, I believe that it is not a useful feature to classify ham and spam. 
+
+
+#Exercise 2
+
+```{r}
+avgLength=function(msgWords){
+  avgs=mean(sapply(msgWords,function(msgWord){nchar(msgWord, keepNA=TRUE)}))
+}
+avg=sapply(msgWordsList, avgLength)
+mean(avg)
+range(avg)
+
+wordLen = emailDF$avgWordLen
+mean(wordLen)
+range(wordLen)
+```
+
+Firstly, the technique with findMsgWords use the stopwords, such as or, yes, which, and the findMsgWords will remove those words from the text, which has the potential influence to higher the average of the length (5.835972 > 4.488554). 
+
+Plus, the algorithm of findMsgWords use the unique() function, so it gets rid of the repetitive words, so there might be some chance to affect the average words length. 
+
+Also the range of both part is different as shown above, which (2.82, 26.0) for findMsgWords and avgLength: (1.36, 26.0) 
+
+Overall, based on the analysis, we are unlikely use findMsgWords function to find the average length.
+
+#Exercise 3
+
+```{r}
+set.seed(418910)
+library(rpart)
+setupRpart = function(data) {
+  logicalVars = which(sapply(data, is.logical))
+  facVars = lapply(data[ , logicalVars], 
+                   function(x) {
+                     x = as.factor(x)
+                     levels(x) = c("F", "T")
+                     x
+                   })
+  cbind(facVars, data[ , - logicalVars])
+}
+
+# Process the email data frame.
+emailDFrp = setupRpart(emailDF)
+
+numSpam = sum(emailDFrp$isSpam=='T')
+numHam = sum(emailDFrp$isSpam=='F')
+# Obtain the Type I and Type II error rates from these fittings.
+
+testSpamIdx = sample(numSpam, size = floor(numSpam/3))
+testHamIdx = sample(numHam, size = floor(numHam/3))
+
+testDF = 
+  rbind( emailDFrp[ emailDFrp$isSpam == "T", ][testSpamIdx, ],
+         emailDFrp[emailDFrp$isSpam == "F", ][testHamIdx, ] )
+trainDF =
+  rbind( emailDFrp[emailDFrp$isSpam == "T", ][-testSpamIdx, ], 
+         emailDFrp[emailDFrp$isSpam == "F", ][-testHamIdx, ])
+
+
+# Fit the recursive partitioning model for spam as a function of all variables in the data frame.
+rpartFit = rpart(isSpam ~ ., data = trainDF, method = "class")
+
+complexityVals = c(seq(1,100,1))
+fits = lapply(complexityVals, function(x) {
+  rpartObj = rpart(isSpam ~ . -VowelPerc , data = trainDF,
+                   method="class", 
+                   control = rpart.control(minsplit = 1, minbucket = x ) )
+  
+  predict(rpartObj, 
+          newdata = testDF[ , names(testDF) != "isSpam"],
+          type = "class")
+})
+
+spam = testDF$isSpam == "T"
+numSpam = sum(spam)
+numHam = sum(!spam)
+errs = sapply(fits, function(preds) {
+  typeI = sum(preds[ !spam ] == "T") / numHam
+  typeII = sum(preds[ spam ] == "F") / numSpam
+  c(typeI = typeI, typeII = typeII)
+})
+
+library(RColorBrewer)
+cols = brewer.pal(9, "Set1")[c(3, 4, 5)]
+plot(errs[1,] ~ complexityVals, type="l", col=cols[2], 
+     lwd = 2, ylim = c(0,0.25),
+     ylab="Error", xlab="Minbucket Values", main = "Error Rate vs Minbucket")
+points(errs[2,] ~ complexityVals, type="l", col=cols[1], lwd = 2)
+
+
+text(x =c(15, 15.1), y = c(0.12, 0.03), 
+     labels=c("Type II Error", "Type I Error"))
+
+minI = which(errs[1,] == min(errs[1,]))[1]
+abline(v = complexityVals[minI], col ="grey", lty =3, lwd=2)
+
+text(3, errs[1, minI]+0.02, 
+     formatC(errs[1, minI], digits = 2))
+text(3, errs[2, minI]+0.02, 
+     formatC(errs[2, minI], digits = 3))
+
+which(errs[1,] == min(errs[1,])) #Minbucket value that has the minimum error rate.
+```
+
+The trend of the plot is that the error for both Type 1 and type 2 increased along with the increasing of minbucket value except the first 31 values. As we could see from the plot and the function returns, with the value from 1 to 31 for minbucket, the error rate are the same, which is 0.054. However, if minbucket is 1, there might overfitting happening in this case, thus, we perfer the relatively safe approach, which we would choose 31 as the approprociate minbucket value. 
+

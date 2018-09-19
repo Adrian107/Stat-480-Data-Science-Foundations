@@ -1,0 +1,174 @@
+---
+title: "DonghanLiuHW09"
+author: "Liu, Donghan, Donghan2"
+date: "2018/4/16"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE,warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r, message=FALSE,warning=FALSE}
+library("ggplot2movies")
+data("movies")
+
+library(dplyr)
+library(ggplot2movies)
+library(Ecdat)
+
+# Convert the length and rating values to numeric categories using floor
+# new values place lengths in 10 minute bins and ratings in 1 unit bins
+newmoviedata<-ggplot2movies::movies
+newmoviedata["length"]<-10*floor(newmoviedata["length"]/10)
+newmoviedata["rating"]<-floor(newmoviedata["rating"])
+```
+
+#Exercise 1
+
+```{r, message=FALSE,warning=FALSE}
+inst_pkgs = load_pkgs =  c("ggplot2","ggplot2movies", "dplyr","babynames","data.table","Rcpp","devtools")
+inst_pkgs = inst_pkgs[!(inst_pkgs %in% installed.packages()[,"Package"])]
+if(length(inst_pkgs)) install.packages(inst_pkgs)
+
+git_pkgs = git_pkgs_load = c("streamgraph","DT")
+
+git_pkgs = git_pkgs[!(git_pkgs %in% installed.packages()[,"Package"])]
+
+if(length(git_pkgs)){
+  library(devtools)
+  install_github('rstudio/DT')
+  install_github('hrbrmstr/streamgraph')
+}
+
+load_pkgs = c(load_pkgs, git_pkgs_load)
+
+# Dynamically load packages
+pkgs_loaded = lapply(load_pkgs, require, character.only=T)
+```
+
+## Movie Lengths over Time
+
+```{r}
+newmoviedata %>%
+  select(year, length) %>%
+  group_by(year, length) %>% 
+  count(length) %>%
+  ungroup -> data
+```
+
+```{r}
+streamgraph(data, "length","n" ,"year",interactive=TRUE) %>%
+  sg_axis_x(20, "year", "%Y") %>%
+  sg_fill_brewer("Blues")
+```
+
+From the steam graph, we could observe that from approximately 1930s, the number of movie has a clear huge increments, and the length of movie stay relatively consistant but small increases for 20-40 years, then, from approximately 1980s to 2000s, the length of movie experiencing another huge increment.The trend is relatively increasing over the year. 
+The length of movies is not equally distributed, the "extreme" length, like 20 and 200, only has the small proportion. 
+
+In addition, the length of 90 has the largest portion, and 0 and 200 relatively take the lowest portion. 
+
+##Movie Ratings over Time
+
+```{r}
+newmoviedata %>%
+  select(year, rating) %>%
+  group_by(year, rating) %>%
+  count(rating) %>%
+  ungroup -> data1
+```
+
+```{r}
+streamgraph(data1, "rating","n" ,"year",interactive=TRUE) %>%
+  sg_axis_x(20, "year", "%Y") %>%
+  sg_fill_brewer("Blues")
+```
+
+Like the length of movies that mentioned above, the trend of rating over the year has the similar change. From 1930s, the rating movies number has great amount of increases and consistant for approximately 50 years. Then, the number of rates increases again near 2000s. Whereas, the rating score itself is generally equally distributed in the middle, for example, 5,6,7 has the similar proportion, but the extreme number like 3 or 8 does not have the great population of rating score, in other words, their distributions are not equal with the middle rates. Overall, both number of rates score and rating itself is increase -> consistant -> increase
+
+#Exercise 2
+
+```{r, message=FALSE,warning=FALSE}
+library(scales)
+grunfeld = Grunfeld
+grunfeld$inv = rescale(grunfeld$inv)
+grunfeld$value = rescale(grunfeld$value)
+grunfeld$capital = rescale(grunfeld$capital)
+grunfeld$firm = as.factor(grunfeld$firm)
+```
+
+```{r, message=FALSE,warning=FALSE}
+library(circlize)
+library(scales)
+par(mar = c(1, 1, 1, 1), lwd = 0.1, cex = 1)
+circos.par("track.height" = 0.1)
+circos.initialize(factors = grunfeld$firm, x = rescale(grunfeld$year))
+
+
+circos.trackPlotRegion(factors = grunfeld$firm, x = rescale(grunfeld$capital),y = rescale(grunfeld$inv))
+
+col = rep(c("#1118FF", "#FF0001"), 5)
+circos.trackLines(grunfeld$firm, rescale(grunfeld$year), rescale(grunfeld$inv), col = col, pch = 16, cex = 1)
+
+bgcol = rep(c("#EFEFEF", "#CCCCCC"), 5)
+
+circos.trackHist(grunfeld$firm, rescale(grunfeld$inv), bg.col = bgcol, col = NA, bin.size = 0.01)
+
+circos.trackPlotRegion(factors = grunfeld$firm, x = rescale(grunfeld$year),y = rescale(grunfeld$inv),panel.fun = function(x, y) {
+                         grey = c("#FFFFFF", "#CCCCCC", "#999999")
+                         sector.index = get.cell.meta.data("sector.index")
+                         xlim = get.cell.meta.data("xlim")
+                         ylim = get.cell.meta.data("ylim")
+                         circos.text(mean(xlim), mean(ylim), sector.index)
+                       })
+
+```
+
+From the first couple factor in firm, the line plot has the obvious trend, either positive or relatively consistant. However it later does not rugged anymore, instead, the trend is becoming flat. Plus, the histogram are slightly longer and tiled. As the firm goes to 10, the histogram turns out to be more narrow and only have few columns in the end. 
+
+
+#Exercise 3
+
+```{r}
+inst_pkgs = load_pkgs =  c("circlize")
+inst_pkgs = inst_pkgs[!(inst_pkgs %in% installed.packages()[,"Package"])]
+if(length(inst_pkgs)) install.packages(inst_pkgs)
+
+pkgs_loaded = lapply(load_pkgs, require, character.only=T)
+
+df = read.csv("HW9TeamData.csv", header = TRUE, stringsAsFactors = FALSE)
+
+start = df$Starting.Division
+end = df$Ending.Division
+
+mat = matrix(0, nrow = length(unique(start)),
+                ncol = length(unique(end))
+             )
+
+rownames(mat) = unique(start)
+colnames(mat) = unique(end)
+
+for(i in seq_along(start)) mat[start[i], end[i]] = mat[start[i], end[i]] + 1
+sorted.labels = sort(union(start, end))
+
+chordDiagram(mat, order = sorted.labels, directional = TRUE)
+```
+
+
+The chord diagram shows that the north division has the least amount of players that moves from itself to other division, whereas, the south division has the largest amount of players that moved. Regarding the team-to-team, the south takes the largest portion, and north and west takes the least. South division is also the largest one that the players keep in their own team. West, east and south are the three divisions that largest move to not in league, compared with the very small amount of north moves. Also, south division takes in the largest portion of people move from not in league to its own division, whereas north takes in the least. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+

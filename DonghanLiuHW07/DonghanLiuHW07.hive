@@ -1,0 +1,35 @@
+-- Exercise 1
+CREATE TABLE stocks (market STRING, stocksymbol STRING, datemdy STRING, price_open FLOAT, price_high FLOAT, price_low FLOAT, price_close FLOAT, volume INT, price_adj_close FLOAT)
+ROW FORMAT DELIMITED
+  FIELDS TERMINATED BY ',';
+
+LOAD DATA LOCAL INPATH '/home/donghan2/Stat480/HW07/stocks.csv'
+OVERWRITE INTO TABLE stocks;
+
+
+SELECT * FROM stocks LIMIT 10;
+
+
+-- Exercise 2
+CREATE TABLE records (market STRING, stocksymbol STRING, datemdy STRING, price_open FLOAT, price_high FLOAT, price_low FLOAT, price_close FLOAT, volume INT, price_adj_close FLOAT);
+INSERT OVERWRITE TABLE records
+SELECT * FROM stocks
+WHERE market = "NASDAQ" AND stocksymbol = "AMZN";
+SELECT * FROM records LIMIT 10;
+
+-- Maximum open stock price for Amazon
+SELECT datemdy, price_open FROM records ORDER BY price_open DESC LIMIT 1;
+
+-- Minimum open stock price for Amazon
+SELECT datemdy, price_open FROM records ORDER BY price_open LIMIT 1;
+
+
+-- Exercise 3
+
+CREATE VIEW avg_closing_price (stocksymbol, market, avg_closing_price)
+AS
+SELECT stocksymbol, market, AVG(price_close)
+FROM stocks
+GROUP BY stocksymbol, market;
+SELECT * FROM avg_closing_price LIMIT 10;
+

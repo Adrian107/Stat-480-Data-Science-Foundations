@@ -1,0 +1,1077 @@
+---
+title: "Stat 480 Group Project - Group 5"
+author: "Dilin Chen, Saumil Padhya, Donghan Liu, Lijun Zhang"
+date: "5/1/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE,warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, message=FALSE,warning=FALSE}
+library(biganalytics)
+library(treemap)
+library(streamgraph)
+library(dplyr)
+library(gplots)
+library(ggplot2)
+air0205 = attach.big.matrix("air0205.desc")
+```
+
+#Introduction
+
+People traveling by air for either work or leisure has been more and more popular, and has made the punctuality of planes being more critical. By punctuality, it means planes not being cancelled or delayed. Since various reasons may cause cancellation and delay of planes, with data provided by the US Department of Transportation"s Bureau of Transportation Statistics (BTS) for year of 2002 and 2005, the group has studied in different cancellation and delay trends, including different time ranges, airport location information, carriers, and plane model involved information. Analysis has formed for 2002 and 2005 data separately,  and results have been compared to tell the difference of flight information in each year. Exploratory analysis and conclusion has been addressed in the following sections.
+
+#Methods
+
+##Data Processing
+
+Our final data set contains data about the airlines, airports, carriers and planes. Multiple steps were involved in combining the data sets 'C
+ 
+1. 	Transforming Data Sets:
+Some variables in the data sets (excluding the airlines data) have a comma (",") character, which prevents the variables from being read into hive in the correct order. "csvtransform.R" replaces "," with "/," so that data can be correctly read into hive using the escaped character "/".
+
+2. 	Combining Data Sets:
+The airports, carriers and planes data sets are combined with the airlines data set using hive. The resulting output of 52 variables is written to "AllAirlineData0205.csv" on the command line.
+
+3.	Big Matrix:
+"AllAirlineData0205.csv" is converted into 2 big matrix objects that contain integer variables and double variables. Some data processing is done before creating these matrix objects. The day, month and year are extracted from the variable "planeissuedate" and created as new variables ("planeissuedate" variable is discarded). Categorical variables are converted to integers 1:n where n is the number of levels. The unique factor names are stored in the R data set "nonintegerColFactors.Rda" for later use in visualizations. Finally, the processed data is written into 2 csv files 'C "AllAirlineData0205.csv" (integer variables) and "AirlineData0205Float.csv" (double type variables). Note that variables "originairport" (name of origin airport), "destairport" (name of destination airport), and "carrierdescription" are not part of the final data set.
+
+Finally, 2 big matrix objects of type "integer" (air0205.bin) and "double" (air0205float.bin) are created.
+
+##Assumptions
+
+Since the number of flights, for instance during each month are different, then the exact number of cancelled flights or arrival delayed flights does not help making reasonable conclusions. The group has decided to create the following new variables. Cancellation Rate is computed by the number of cancelled flights over the number of flights for a same time range. This variable gives the probability of a flight to be cancelled, or the percentage of all flights to be cancelled during that certain time period. Arrival Delay Rate is calculated as number of flights has been delayed over number of flights for the same time period. This generated variable tells the probability of a flight facing arrival delay, or the percentage of all flights delayed at arrival. If these generated rate variables are of higher value, indicating a higher possibility of cancellation or arrival delay for that time range. On the other hand, a lower value means a smaller probability of cancellation or arrival delay.
+
+For a lot of the visualizations involving treemaps and heatmaps, the 99th or 99.99th percentile of delays was used to take into account the worst delays. This measure was also used in part because more than 75% of the flights have no delays (0 delay) and thus, all statistics limited to 75th percentile contained little information.
+
+
+#Results
+
+```{r}
+air02 = air0205[air0205[,'year'] == '2002',]
+air05 = air0205[air0205[,'year'] == '2005',]
+air0205_cancel <- air0205[which(air0205[ , "cancelled"] == 1), ]
+```
+
+```{r}
+# Load big matrix objects
+latlong <- attach.big.matrix("air0205float.desc")
+load("nonintegerColFactors.Rda")
+
+# Load carriers.csv for carrier description
+carriers <- read.csv("carriers.csv", header=TRUE)
+carriers <- filter(carriers, Code %in% colMappings[["uniquecarrier"]])
+```
+
+
+```{r}
+data = air0205
+# Function to generate treemap
+drawMap <- function(vars, group_var, cont_grp, final_col_names, plot_title, stat_func){
+  #vars<-c("carrierdelay", "arrdelay")
+  if(cont_grp){
+    by_grp <- ifelse(data[,group_var]!=0 & !is.na(data[,group_var]),
+                     floor(data[,group_var]/10)*10,
+                     NA)
+    # replace 1950 with 1960 since
+    # 1950 has too few observatons
+    by_grp[by_grp==1950] <- 1960
+  } else{
+    by_grp <- colMappings[[group_var]][data[,group_var]]
+  }
+  x<-aggregate(x=data[,vars],
+               by=list(Carrier = by_grp),
+               FUN=stat_func)
+  # Combine 99th and 99.99th percentile cols
+  for(col in colnames(x)){
+    col_names <- colnames(x[,col])
+    if(!is.null(col_names)){
+      for(name in col_names){
+        x[,paste(col, name)] <- x[,col][,name] 
+      }
+      x <- select(x, -one_of(col))
+    }
+  }
+  
+  colnames(x)<-final_col_names
+  # Add carrier description
+  # x[,"Desc"] <- sapply(x[,"Carrier"],
+  #                      function(x) carriers[carriers[,"Code"]==x,
+  #                                           "Description"])
+  treemap(x,
+          index=final_col_names[1],
+          vSize=final_col_names[2],
+          vColor=final_col_names[3],
+          type="value", title=plot_title,
+          lowerbound.cex.labels = 0,
+          force.print.labels = TRUE)
+}
+
+# Function to generate heatmap
+drawHeatMap <- function(vars, group_var, final_col_names, plot_title, stat_func, img_name){
+  #vars<-c("carrierdelay", "arrdelay")
+  # if(cont_grp){
+  #   by_grp <- ifelse(data[,group_var]!=0 & !is.na(data[,group_var]),
+  #                    floor(data[,group_var]/10)*10,
+  #                    NA)
+  # } else{
+    by_grp <- colMappings[[group_var]][data[,group_var]]
+  # }
+  x<-aggregate(x=data[,vars],
+               by=list(Carrier = by_grp),
+               FUN=stat_func)
+  # Combine 99th and 99.99th percentile cols
+  for(col in colnames(x)){
+    col_names <- colnames(x[,col])
+    if(!is.null(col_names)){
+      for(name in col_names){
+        x[,paste(col, name)] <- x[,col][,name] 
+      }
+      x <- select(x, -one_of(col))
+    }
+  }
+  
+  colnames(x)<-final_col_names
+  grp_col <- x[,final_col_names[1]]
+  x <- select(x, -one_of(final_col_names[1]))
+  x <- as.matrix(x)
+  colnames(x) <- final_col_names[-1]
+  row.names(x) <- grp_col
+  # Add carrier description
+  # x[,"Desc"] <- sapply(x[,"Carrier"],
+  #                      function(x) carriers[carriers[,"Code"]==x,
+  #                                           "Description"])
+  # row.names(x) <- x[,final_col_names[1]]
+  # x <- select(x, -one_of(final_col_names[1]))
+  #png(img_name)
+  plot.new()
+  #par(mar=c(4.1, 3.1, 3.1, 1.1))
+  out<-heatmap.2(x, scale = "column", trace = "none", density.info = "none",
+                 dendrogram="row", cexCol=0.6, cexRow=0.8, srtCol=0,
+                 main=plot_title, xlab="Types of Delay", ylab=final_col_names[1])
+  #dev.off()
+}
+
+# re-writing the stream graph package
+# because of issues with the original package
+streamgraph <- function (data, key, value, date, width = NULL, height = NULL, 
+                         offset = "silhouette", interpolate = "cardinal", interactive = TRUE, scale = "date", top = 20, right = 40, bottom = 30, left = 50) 
+{
+  if (!(offset %in% c("silhouette", "wiggle", "expand", "zero"))) {
+    warning("'offset' does not have a valid value, defaulting to 'silhouette'")
+    offset <- "silhouette"
+  }
+  if (!(interpolate %in% c("cardinal", "linear", "step", "step-before", 
+                           "step-after", "basis", "basis-open", "cardinal-open", 
+                           "monotone"))) {
+    warning("'interpolate' does not have a valid value, defaulting to 'cardinal'")
+    interpolate <- "cardinal"
+  }
+  data <- data[, c(key, value, date)]
+  colnames(data) <- c("key", "value", "date")
+  xtu <- "month"
+  xtf <- "%b"
+  xti <- 1
+  if (scale == "date") {
+    if (all(class(data$date) %in% c("numeric", "character", 
+                                    "integer"))) {
+      if (all(nchar(as.character(data$date)) == 4)) {
+        data <- data %>% mutate(date = sprintf("%04d-01-01", 
+                                               as.numeric(date)))
+        xtu <- "year"
+        xtf <- "%Y"
+        xti <- 10
+      }
+    }
+  }
+  else {
+    xtu <- NULL
+    xtf <- ",.0f"
+    xti <- 10
+  }
+  data <- data %>% left_join(tidyr::expand(., key, date), ., 
+                             by = c("key", "date")) %>% mutate(value = ifelse(is.na(value), 
+                                                                              0, value)) %>% select(key, value, date)
+  if (scale == "date") {
+    data <- data %>% mutate(date = format(as.Date(date), 
+                                          "%Y-%m-%d")) %>% arrange(date)
+  }
+  params = list(data = data, markers = NULL, annotations = NULL, 
+                offset = offset, interactive = interactive, interpolate = interpolate, 
+                palette = "Spectral", text = "black", tooltip = "black", 
+                x_tick_interval = xti, x_tick_units = xtu, x_tick_format = xtf, 
+                y_tick_count = 5, y_tick_format = ",g", top = top, right = right, 
+                bottom = bottom, left = left, legend = FALSE, legend_label = "", 
+                fill = "brewer", label_col = "black", x_scale = scale)
+  htmlwidgets::createWidget(name = "streamgraph", x = params, 
+                            width = width, height = height, package = "streamgraph")
+}
+
+# function to draw stream graph
+drawStreamGraph <- function(vars, group_vars, final_col_names, stat_func){
+  #vars<-c("carrierdelay", "arrdelay")
+  # by_grp1 <- ifelse(data[,group_vars[1]]!=0 & !is.na(data[,group_vars[1]]),
+  #                  floor(data[,group_vars[1]]/10)*10,
+  #                  NA)
+  by_grp1 <- ifelse(data[,group_vars[1]]!=0 & !is.na(data[,group_vars[1]]),
+                    data[,group_vars[1]],
+                    NA)
+  by_grp2 <- colMappings[[group_vars[2]]][data[,group_vars[2]]]
+  x<-aggregate(x=data[,vars],
+               by=list(x = by_grp1, y=by_grp2),
+               FUN=stat_func)
+  # Combine 99th and 99.99th percentile cols
+  for(col in colnames(x)){
+    col_names <- colnames(x[,col])
+    if(!is.null(col_names)){
+      for(name in col_names){
+        x[,paste(col, name)] <- x[,col][,name] 
+      }
+      x <- select(x, -one_of(col))
+    }
+  }
+  
+  colnames(x)<-final_col_names
+  # Add carrier description
+  # x[,"Desc"] <- sapply(x[,"Carrier"],
+  #                      function(x) carriers[carriers[,"Code"]==x,
+  #                                           "Description"])
+  #print(x)
+  #x[,final_col_names[1]] <- paste(x[,final_col_names[1]],
+  #                                "-01-01", sep="")
+  streamgraph(x, final_col_names[2], final_col_names[3],
+              final_col_names[1])
+}
+```
+
+##Cancellation v.s. Diversion
+```{r}
+drawMap(c("diverted", "cancelled"),
+        "planeyear", TRUE,
+        c("Year Manufactured", "Diversion Rate", "Cancellation Rate"),
+        "Diversion Rate vs Cancellation Rate",
+        #function(x) quantile(x, probs=0.99, na.rm=TRUE),
+        function(x) sum(x==1)/length(x)*100)
+```
+
+From treemap above, we can see that older planes have relatively higher diversion and cancellation rates. Planes manufactured before 1960s and in 1970s have a slightly higher diversion rate (averaging ~0.24%) and a significantly higher cancellation rate (averaging ~1.50%) than the planes manufactured after 1970s with diversion rate averaging ~0.19% and cancellation rate averaging ~0.65%.
+
+##Flight number & Cancellation over the various time type
+
+###Flight number by Months
+
+```{r, message=FALSE,warning=FALSE}
+flight_mon02 = c(rep(0,12))
+flight_mon05 = c(rep(0,12))
+month = 1:12
+for (i in 1:12){
+  flight_mon02[i] = (nrow(air02[air02[,'month'] == month[i],]))
+  flight_mon05[i] = (nrow(air05[air05[,'month'] == month[i],]))
+}
+mon = as.data.frame(cbind(Flight_Number = flight_mon02, flight_mon05, Months = c(1:12)))
+ggplot(data=mon) + 
+  geom_line(aes(x = Months, y = Flight_Number, colour = "02 Flight Number by Mon")) + 
+  geom_line(aes(x = Months, y = flight_mon05, colour = "05 Flight Number by Mon"))+
+  scale_x_continuous(breaks=seq(1, 12, 1))
+```
+
+###Cancellation by Months
+
+```{r}
+# by month - all data
+monthind_02 = split(1:nrow(air02), air02[,"month"])
+month_cancel_02 <- foreach(inds = monthind_02, .combine = cbind) %do% {
+  mean(air02[inds, "cancelled"], na.rm=TRUE)
+}
+month_cancel_02 = t(month_cancel_02)
+
+monthind_05 = split(1:nrow(air05), air05[,"month"])
+month_cancel_05 <- foreach(inds = monthind_05, .combine = cbind) %do% {
+  mean(air05[inds, "cancelled"], na.rm=TRUE)
+}
+month_cancel_05 = t(month_cancel_05)
+
+month = as.data.frame(cbind(month_cancel_02, month_cancel_05, Month = c(1:12)))
+ggplot(data=month) +
+  geom_line(aes(x = Month, y = V1, colour = "2002")) + 
+  geom_line(aes(x = Month, y = V2, colour = "2005")) +
+  ylab("Cancellation Rate") +
+  xlab("Month")+
+  ggtitle("Flight Cancellation Rate by Month") +
+  scale_x_continuous(breaks=seq(1, 12, 1), labels = c("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"))
+
+```
+
+Since weather conditions vary from month to month every year, but a seasonal trend still lies in. Other conditions like the end or the beginning of fiscal year or natural year may affect business travels, the group has found interesting trends with each month as the time bins as following.
+
+The cancellation rate for each month is generally higher in 2005 than in 2002, except in June 2002. For 2002, cancellation rate is higher in summer and winter, while lower in spring and fall with no huge fluctuations. For 2005, the cancellation rate is extremely high in January (more than 0.04) since there were heavy snow and mixed precipitation storm, and the cancellation rate is also high during the summer since Tropical Storm Arlene, and Hurricane Katrina at that time. Whereas, the comparisons from flight number between 2002 and 2005 shows that the flight number from 2005 has a huge increasing than the year of 2002, even though their general trends are approximately same. From the perspective of flight number trend, July and August have the relatively highest flight number among the corresponding year. This might be caused by the summer travel, especially for the academic and personal travel plan. The summer is the time that schools are in the breaks and students and teachers are going back to home, some companies like Amgen also choose to have their employee a nice summer break during the fourth of July. There is a huge decreasing between August and September, which might be influenced by Fall semester starts and people's personal works are back to the normal track. The February is the lowest scheduled flight number for both 2002 and 2005.  
+
+###Arrival delay by month
+
+```{r}
+x = air0205
+# Monthly
+# Monthly arrival delay rate.
+ArrdelayRateMonTotal <- matrix(, nrow = 0, ncol = 12)
+ArrdelayRateMon <- integer(12)
+for (j in 1:12){
+    ArrdelayRateMon[j] <-  sum((x[,"arrdelay"] > 0) & (x[,"year"] == 2002) & 
+                                 (x[, "month"]==j), na.rm = TRUE)/sum((x[,"year"] ==2002)
+                                                                      & (x[, "month"]==j),
+                                                                      na.rm = TRUE)
+  }
+ArrdelayRateMonTotal <- rbind(ArrdelayRateMonTotal, ArrdelayRateMon)
+for (j in 1:12){
+    ArrdelayRateMon[j] <-  sum((x[,"arrdelay"] > 0) & (x[,"year"] == 2005) & 
+                                 (x[, "month"]==j), na.rm = TRUE)/sum((x[,"year"] ==2005)
+                                                                      & (x[, "month"]==j),
+                                                                      na.rm = TRUE)
+  }
+ArrdelayRateMonTotal <- rbind(ArrdelayRateMonTotal, ArrdelayRateMon)
+
+# plot
+matplot(t(ArrdelayRateMonTotal), type = c("b"), pch = 1, col = c("blue","darkblue"),
+        main = "Arrival delay rate over months", 
+        xlab = "Month", ylab = "Arrival delay rate")
+legend("bottomleft", legend = c("2002","2005"), col = c("blue","darkblue"), pch = 1) 
+
+```
+
+
+According to the figure above, year of 2005 tend to have higher arrival delay rate than 2002 did, but trends for these years are similar, except July and October. Higher arrival delay rates including January and December for both years, which are nearly the highest values. This winter time could have higher probability of extreme weather conditions, resulting in higher arrival delay rates. One other point with higher value for year of 2002 was in March, which has been an abnormal steep increase from February since usually winter ends during March.  What happened was a heavy snow starting from the end of February in the midwest of the U.S., resulting in highest value for arrival delay rate on March. Another noticeable increase in the figure happened to July of 2005, which may caused by air traffic since there was more flights comparing with other months.  Lowest values appeared during September of both years, as skies are clear and number of flights are back to normal.
+
+
+###Flight Number By Day of Week
+
+```{r}
+flight_week_02 = c(rep(0,7))
+flight_week_05 = c(rep(0,7))
+week = 1:7
+for (i in 1:7){
+  flight_week_02[i] = (nrow(air02[air02[,'dayofweek'] == week[i],]))
+  flight_week_05[i] = (nrow(air05[air05[,'dayofweek'] == week[i],]))
+}
+week = as.data.frame(cbind(flight_week_02, flight_week_05, Weeks = c(1:7)))
+ggplot(data=week) + 
+  geom_line(aes(x = Weeks, y = flight_week_02, colour = "02 Flight Number by Week")) + 
+  geom_line(aes(x = Weeks, y = flight_week_05, colour = "05 Flight Number by Week"))+
+  scale_x_continuous(breaks=seq(1, 7, 1))
+
+```
+
+###Cancellation By Day of Week
+
+```{r}
+# by dayofweek - all data
+dayind_02 = split(1:nrow(air02), air02[,"dayofweek"])
+day_cancel_02 <- foreach(inds = dayind_02, .combine = cbind) %do% {
+  mean(air02[inds, "cancelled"], na.rm=TRUE)
+}
+day_cancel_02 = t(day_cancel_02)
+
+dayind_05 = split(1:nrow(air05), air05[,"dayofweek"])
+day_cancel_05 <- foreach(inds = dayind_05, .combine = cbind) %do% {
+  mean(air05[inds, "cancelled"], na.rm=TRUE)
+}
+day_cancel_05 = t(day_cancel_05)
+
+day = as.data.frame(cbind(day_cancel_02, day_cancel_05, days = c(1:7)))
+ggplot(data=day) +
+  geom_line(aes(x = days, y = V1, colour = "2002")) + 
+  geom_line(aes(x = days, y = V2, colour = "2005")) +
+  ylab("Cancellation Rate") +
+  xlab("Day of Week") +
+  ggtitle("Flight Cancellation Rate by Day of Week") +
+  scale_x_continuous(breaks=seq(1, 7, 1), labels = c("Mon","Tue","Wed","Thu","Fri","Sat","Sun"))
+  
+```
+
+
+
+One of the smaller working or life cycle for people is the week, like going to work place on Mondays and going back home or go on vacations on the beginning of the weekends. This section illustrated reasonable analysis and talked about possible causes over each day of week.
+
+The cancellation rate for each day of week is generally higher in 2005 than in 2002, but the trend is quite similar. In both 2002 and 2005, the cancellation rate is higher on Tuesday, Wednesday, and Thursday,  while the cancellation rate is lower on Friday and on weekends. However, there is a small connection between cancellation rate and scheduled flight number. For example, along with the obvious increasing in Tuesday of 2002, the scheduled flight number also has a rising in the same day of week. As the comparison between these two years, their scheduled flight number has the relatively same trend. Among them, Saturday is the day of week that scheduled the least flights. In reality, people are travelling over the weekday for either business or personal matters, then the weekend is the good time to rest themselves and they started to plan ahead for the next week on Sunday (flight number increment). Followed by the same logics, in 2002, Saturday and Sunday are the least cancellation rate in the respective week since the scheduled flight number is not as big as the weekdays. Surprisingly, as mentioned before, the scheduled flights for Friday is the largest among the entire week, but the cancellation rate is the unanticipated lowest one. By the analysis from the real world, Friday is the day that most people plan to back to home, so the scheduled flights are increased by carrier, whereas the cancellation flights number stay consistent. Thus, the flight number increased with cancellation rate reducing. 
+
+###Arrival delay by day of week
+
+```{r}
+# Day of week
+# Average daily arrival delay rate over weeks for each year.
+ArrdelayRateWeekThoTotal <- matrix(, nrow = 0, ncol = 7)
+ArrdelayRateWeekTho <- integer(7)
+for (j in 1:7){
+    ArrdelayRateWeekTho[j] <- sum((x[,"arrdelay"] > 0) & (x[,"year"] == 2002) 
+                                   & (x[, "dayofweek"]==j), 
+                                   na.rm = TRUE)/sum((x[,"year"] ==2002)
+                                                     & (x[, "dayofweek"]==j), 
+                                                     na.rm = TRUE)
+  }
+ArrdelayRateWeekThoTotal <- rbind(ArrdelayRateWeekThoTotal, ArrdelayRateWeekTho)
+for (j in 1:7){
+    ArrdelayRateWeekTho[j] <- sum((x[,"arrdelay"] > 0) & (x[,"year"] == 2005) 
+                                   & (x[, "dayofweek"]==j), 
+                                   na.rm = TRUE)/sum((x[,"year"] ==2005)
+                                                     & (x[, "dayofweek"]==j), 
+                                                     na.rm = TRUE)
+  }
+ArrdelayRateWeekThoTotal <- rbind(ArrdelayRateWeekThoTotal, ArrdelayRateWeekTho)
+
+# plot
+matplot(t(ArrdelayRateWeekThoTotal), type = c("b"), pch = 1, col = c("blue","darkblue"),
+        main = "Arrival delay rate over day of week", 
+        xlab = "Day of week", ylab = "Arrival delay rate")
+legend("bottomleft", legend = c("2002","2005"), col = c("blue","darkblue"), pch = 1) 
+```
+
+Arrival delay rate: It is clear in the figure that both year have exact same trends over the day of week for average arrival delay rate, with higher value for Thursdays and Fridays and lowest value for Saturdays. During Fridays, people maybe flying back home or from home for short trips, while for Saturdays, people may tend to be stay where they are for the middle of weekends. However, year of 2005 obviously has higher values in comparison with year of 2002. Reasons may because of larger number of flights were scheduled for 2005 instead of 2002, may resulting in higher probability of air traffic.
+
+###Flight number by origin airport
+
+```{r}
+flight_ori_02 = air02[,'origin']
+flight_ori_05 = air05[,'origin']
+freq_ori_02 = rev(table(flight_ori_02)[order(table(flight_ori_02))])
+freq_ori_05 = rev(table(flight_ori_05)[order(table(flight_ori_05))])
+x = rbind(freq_ori_02[1:5],freq_ori_05[1:5])
+colnames(x) = c("ORD/ATL","DFW/ORD","ATL/DFW","LAX/LAX","PHX/IAH")
+barplot(x,col=c("lightblue","blue"), beside=TRUE, legend = c("2002","2005"), xlab = "Airport Code", ylab = "Origin Flight Number")
+```
+
+###Cancellation by origin airport
+
+```{r}
+# by origin airport
+airportind_02 = split(1:nrow(air02), air02[,"origin"])
+airname_02 = names(airportind_02)
+airport_cancel_02 <- foreach(inds = airportind_02, .combine = cbind) %do% {
+  mean(air02[inds, "cancelled"], na.rm=TRUE)
+}
+ac_02 = t(as.data.frame(airport_cancel_02))
+ac_02 = cbind(ac_02,as.data.frame(airname_02))
+ac_top5_02 = ac_02[order(-ac_02[,1], ac_02[,2]), ][1:5,]
+
+airportind_05 = split(1:nrow(air05), air05[,"origin"])
+airname_05 = names(airportind_05)
+airport_cancel_05 <- foreach(inds = airportind_05, .combine = cbind) %do% {
+  mean(air05[inds, "cancelled"], na.rm=TRUE)
+}
+ac_05 = t(as.data.frame(airport_cancel_05))
+ac_05 = cbind(ac_05,as.data.frame(airname_05))
+ac_top5_05 = ac_05[order(-ac_05[,1], ac_05[,2]), ][1:5,]
+
+ac = rbind(ac_top5_02$ac_02,ac_top5_05$ac_05)
+colnames(ac) = c("AGS/PVU","DUT/ACK","GST/CSG","ORH/VIS","BIL/FLO")
+barplot(ac,col=c("lightblue","blue"), beside=TRUE,
+        xlab = "Airport",
+        ylab = "Cancellation Rate",
+        legend = c("2002", "2005"),
+        main = "Top 5 Airport with Highest Flight Cancellation Rate")
+
+```
+
+IATA Airport Codes have be provided along the dataset, which is a number around 291. With this large number of airports, it is not reasonable to tell what happened to each of them. The group has decided to have top 5 airports analyzed to show their corresponding cancellation rate, number of flights, and arrival delay rate. 
+
+All flights were cancelled originated from Augusta Regional Airport (AGS), which is a city-owned public airport seven miles south of Augusta, in Richmond County, Georgia in 2002. All flights were cancelled originated from Provo Municipal Airport (PVU), which is a public airport two miles west of Provo, in Utah County, Utah in 2005. In 2002, approximately 20% of flights at Unalaska Airport (DUT) were cancelled, and this airport was ranked second highest cancellation rate. The extremely high cancellation rate might be affected by the airport size, location, and capacity. The AGS only have one terminal (in 2002 & 2005) and only serve a small town, as well as PVU. 
+
+The scheduled flights of 2005 for each airport are obviously higher than the 2002"s. Among them, ORD (O'Hare International Airport) is the busiest airport in 2002, while the busiest airport is ATL (Hartsfield-Jackson Atlanta International Airport) in 2005. However, compared with the same airport from the different year, ORD only has the small increment regarding the scheduled flights from 2002 to 2005, while the ATL has the huge increment (approximately 80%), which potentially represent a rapid economy development in Atlanta area. 
+
+###Arrival delay by airports
+
+```{r}
+# Airports with top 5 arrival delay rate
+x = air0205
+AirNumFlight <- table(x[,"origin"])
+numOri <- dim(AirNumFlight)
+ArrdelayRateAnnAirportTotal <- matrix(, nrow=0, ncol=numOri)
+ArrdelayRateAnnAirport = double(numOri)
+for (i in 1:numOri){
+  ArrdelayRateAnnAirport[i] <- sum((air02[,"arrdelay"] > 0) & air02[,"origin"] == i, 
+                                   na.rm = TRUE)/AirNumFlight[i]
+}
+Air1 <- sort(ArrdelayRateAnnAirport,decreasing=TRUE)
+ArrdelayRateAnnAirportTotal <- rbind(ArrdelayRateAnnAirportTotal, Air1)
+
+for (i in 1:numOri){
+  ArrdelayRateAnnAirport[i] <- sum((air05[,"arrdelay"] > 0) & air05[,"origin"] == i, 
+                                   na.rm = TRUE)/AirNumFlight[i]
+}
+Air2 <- sort(ArrdelayRateAnnAirport,decreasing=TRUE)
+ArrdelayRateAnnAirportTotal <- rbind(ArrdelayRateAnnAirportTotal, Air2)
+
+top5Airport = ArrdelayRateAnnAirportTotal[,1:5]
+colnames(top5Airport) = c("SUX/CKB","DUT/CYS","ORH/OGD","MAZ/ADK","JNU/ACK")
+barplot(top5Airport,col=c("lightblue","blue"), beside=TRUE, legend = c("2002","2005"), xlab = "Airport Code", ylab = "Arrival Delay Rate")
+```
+
+
+Sioux Gateway Airport(SUX) has all its schedule flights delayed during the year of 2002, which is a public and military use airport in Woodbury County, Iowa state. This high arrival delayed rate may caused by military missions, which is understandable. North Central West Virginia Airport(CKB), and Cheyenne Regional Airport(CYS), are joint-use airport both for public and military and have 100% arrival delay rate for year of 2005, which could caused by the same reason as SUX. Ogden-Hinckley Airport(OGD), have all of their scheduled flights delayed as well for year of 2005, which has been billed as Utah's busiest municipal airport for private planes. Since private jets absolutely have higher priority of landing, it makes sense to have high arrival delay rate.
+
+
+###Flight number by origin state
+
+```{r}
+flight_ori_state_02 = air02[,'originstate']
+flight_ori_state_05 = air05[,'originstate']
+freq_ori_state_02 = rev(table(flight_ori_state_02)[order(table(flight_ori_state_02))])
+freq_ori_state_05 = rev(table(flight_ori_state_05)[order(table(flight_ori_state_05))])
+x = rbind(freq_ori_state_02[1:5],freq_ori_state_05[1:5])
+colnames(x) = c("TX/CA","CA/TX","IL/FL","FL/GA","GA/IL")
+barplot(x,col=c("lightblue","blue"), beside=TRUE, legend = c("2002","2005"), xlab = "State Code", ylab = "Origin Flight Number")
+```
+
+
+###Cancellation by origin state
+
+```{r}
+# by origin state
+stateind_02 = split(1:nrow(air02), air02[,"originstate"])
+statename_02 = names(stateind_02)
+state_cancel_02 <- foreach(inds = stateind_02, .combine = cbind) %do% {
+  mean(air02[inds, "cancelled"], na.rm=TRUE)
+}
+sc_02 = t(as.data.frame(state_cancel_02))
+sc_02 = cbind(sc_02,as.data.frame(statename_02))
+sc_top5_02 = sc_02[order(-sc_02[,1], sc_02[,2]), ][1:5,]
+
+stateind_05 = split(1:nrow(air05), air05[,"originstate"])
+statename_05 = names(stateind_05)
+state_cancel_05 <- foreach(inds = stateind_05, .combine = cbind) %do% {
+  mean(air05[inds, "cancelled"], na.rm=TRUE)
+}
+sc_05 = t(as.data.frame(state_cancel_05))
+sc_05 = cbind(sc_05,as.data.frame(statename_05))
+sc_top5_05 = sc_05[order(-sc_05[,1], sc_05[,2]), ][1:5,]
+
+sc = rbind(sc_top5_02$sc_02,sc_top5_05$sc_05)
+colnames(sc) = c("AK/MS","ME/ME","WI/LA","IA/MA","MA/GA")
+barplot(sc,col=c("lightblue","blue"), beside=TRUE,
+        xlab = "State",
+        ylab = "Cancellation Rate",
+        legend = c("2002", "2005"),
+        main = "Top 5 State with Highest Flight Cancellation Rate")
+
+```
+
+The cancellation rates for the top 5 state are all higher in 2005 than in 2002, which is consistent to the results we found when doing analysis for day of week and month for each year. In 2002, Alaska (AK) showed the highest cancellation rate, while Maine (ME), Wisconsin (WI), Iowa (IA), Massachusetts (MA) ranked in sequence. In 2005, Mississippi (MS) showed the highest cancellation rate, while Maine (ME), Louisiana (LA), Massachusetts (MA),  Georgia (GA) ranked in sequence. We could notice that both Maine (ME) and Massachusetts (MA) gave high cancellation rate in the two years, and these two states are next to each other in very north part of America. The reason could be the geometrical, since they could have snow storm in winter which may have huge impact on flights.
+
+Connecting cancellation rate with flight number, GA shows up in the top five highest flight cancellation rate state in 2005 along with its flight number has approximately 100% increments from 2002 to 2005. Both TX and CA has a explicit rising, but CA finally took over the first place in 2005. IL does not increase a lot, and drop its place from third to fifth, which might caused by the largest airport, ORD"s growth is slowing down. 
+
+###Arrival delays by origin state
+
+```{r}
+# Origin state
+# State delay rate for each year. Top 5/Tail 5
+x = air0205
+StaNumFlight <- table(x[,"originstate"])
+numSta <- dim(StaNumFlight)
+ArrdelayRateAnnSatTotal <- matrix(, nrow=0, ncol=numSta)
+ArrdelayRateAnnSta = double(numSta)
+for (i in 1:numSta){
+  ArrdelayRateAnnSta[i] <- sum((air02[,"arrdelay"] > 0) & air02[,"originstate"] == i,
+                               na.rm=TRUE)/StaNumFlight[i]
+}
+Sta1 <- sort(ArrdelayRateAnnSta,decreasing=TRUE)
+ArrdelayRateAnnSatTotal <- rbind(ArrdelayRateAnnSatTotal, Sta1)
+
+for (i in 1:numSta){
+  ArrdelayRateAnnSta[i] <- sum((air05[,"arrdelay"] > 0) & air05[,"originstate"] == i,
+                               na.rm=TRUE)/StaNumFlight[i]
+}
+Sta2 <- sort(ArrdelayRateAnnSta,decreasing=TRUE)
+ArrdelayRateAnnSatTotal <- rbind(ArrdelayRateAnnSatTotal, Sta2)
+
+top5State = ArrdelayRateAnnSatTotal[,1:5]
+colnames(top5State) = c("MI/WV","MN/WY","AK/VT","MO/GA","MD/UT")
+barplot(top5State,col=c("lightblue","blue"), beside=TRUE, legend = c("2002","2005"), xlab = "State Code", ylab = "Arrival Delay Rate")
+```
+
+Year of 2005 clearly has higher arrival delay rate compared with year of 2002 for the top 5 states, and states with top 5 arrival delay rate are totally different. Michigan(MI), and Minnesota(MN) had ranked top 2 for their arrival delay rate in year of 2005, which are clearly located very north of the U.S., indicating severe weather condition may have influence on arrival delays. West Virginia(WV), and Wyoming(WY) had ranked top 2 during year of 2002. These two states have different latitude compared with the two states for 2002, but all have top arrival delay rate. 
+
+
+###Flight number by carrier
+
+```{r}
+flight_carrier_02 = air02[,'uniquecarrier']
+flight_carrier_05 = air05[,'uniquecarrier']
+freq_carrier_02 = rev(table(flight_carrier_02)[order(table(flight_carrier_02))])
+freq_carrier_05 = rev(table(flight_carrier_05)[order(table(flight_carrier_05))])
+x = rbind(freq_carrier_02[1:5],freq_carrier_05[1:5])
+colnames(x) = c("WN/WN","AA/AA","DL/DL","UA/MQ","NW/OO")
+barplot(x,col=c("lightblue","blue"), beside=TRUE, legend = c("2002","2005"), xlab = "State Code", ylab = "Destination Flight Number")
+```
+
+###Cancellation by carrier
+
+```{r}
+# by carrier - uniquecarrier
+carrind_02 = split(1:nrow(air02), air02[,"uniquecarrier"])
+carrname_02 = names(carrind_02)
+carr_cancel_02 <- foreach(inds = carrind_02, .combine = cbind) %do% {
+  mean(air02[inds, "cancelled"], na.rm=TRUE)
+}
+cc_02 = t(as.data.frame(carr_cancel_02))
+cc_02 = cbind(cc_02,as.data.frame(carrname_02))
+cc_top5_02 = cc_02[order(-cc_02[,1], cc_02[,2]), ][1:5,]
+
+carrind_05 = split(1:nrow(air05), air05[,"uniquecarrier"])
+carrname_05 = names(carrind_05)
+carr_cancel_05 <- foreach(inds = carrind_05, .combine = cbind) %do% {
+  mean(air05[inds, "cancelled"], na.rm=TRUE)
+}
+cc_05 = t(as.data.frame(carr_cancel_05))
+cc_05 = cbind(cc_05,as.data.frame(carrname_05))
+cc_top5_05 = cc_05[order(-cc_05[,1], cc_05[,2]), ][1:5,]
+
+cc = rbind(cc_top5_02$cc_02,cc_top5_05$cc_05)
+colnames(cc) = c("MQ/EV","AS/MQ","NW/OH","AA/DL","DL/air0205E")
+barplot(cc,col=c("lightblue","blue"), beside=TRUE,
+        xlab = "Carrier",
+        ylab = "Cancellation Rate",
+        legend = c("2002", "2005"),
+        main = "Top 5 Carrier with Highest Flight Cancellation Rate")
+```
+
+The cancellation rates for the top 5 carrier are all higher in 2005 than in 2002, same trend as other analysis. The cancellation rate of EVA Air Corporation (an international airline based at Taoyuan International Airport near Taipei, Taiwan) in 2005 is extremely high, over 0.04. In 2002, Envoy Air (MQ, an air carrier headquartered in Irving, Texas, in the Dallas-Fort Worth metroplex) had the highest cancellation rate. Envoy Air and Delta Air Lines showed high cancellation rate in the two years.
+
+Even though DL took the third place of top flights number for both 2002 and 2005, its high cancellation rate is not avoidable. Even worse, delta"s cancellation rate has more than 100% increment between 2002 and 2005 when its flight number only has a slight rising. In contrast, AA has the higher scheduled flights than DL but appears in the top 5 cancellation carrier for only one year, which indicates that it is making efforts to reduce the cancellation rates over the three years. In addition, NW airline was in the top five carrier flight number (fifth) in 2002, but it reaches the third place regarding the cancellation rate in 2002, in other words, NW has relatively high cancellation rate with considerations of carrier scheduled flight number.
+
+###Arrival delay by carrier
+
+```{r}
+# Carrier delay rate for each year. Top 5/Tail 5
+# Arrival delay rate over years
+x = air0205
+CarNumFlight <- table(x[,"uniquecarrier"])
+numCar <- dim(CarNumFlight)
+ArrdelayRateAnnCarTotal <- matrix(, nrow=0, ncol=numCar)
+ArrdelayRateAnnCar = double(numCar)
+for (i in 1:numCar){
+  ArrdelayRateAnnCar[i] <- sum((air02[,"arrdelay"] > 0) & air02[,"uniquecarrier"] == i,
+                               na.rm=TRUE)/CarNumFlight[i]
+}
+Car1 <- sort(ArrdelayRateAnnCar,decreasing=TRUE)
+ArrdelayRateAnnCarTotal <- rbind(ArrdelayRateAnnCarTotal,Car1)
+
+for (i in 1:numCar){
+  ArrdelayRateAnnCar[i] <- sum((air05[,"arrdelay"] > 0) & air05[,"uniquecarrier"] == i,
+                               na.rm=TRUE)/CarNumFlight[i]
+}
+Car2 <- sort(ArrdelayRateAnnCar,decreasing=TRUE)
+ArrdelayRateAnnCarTotal <- rbind(ArrdelayRateAnnCarTotal,Car2)
+
+top5Carrier = ArrdelayRateAnnCarTotal[,1:5]
+colnames(top5Carrier) = c("DL/B6","AS/FL","CO/XE","NM/EV","HP/F9")
+barplot(top5Carrier,col=c("lightblue","blue"), beside=TRUE, legend = c("2002","2005"), xlab = "Carrier Code", ylab = "Arrival Delay Rate")
+```
+
+Delta ranked first in year of 2002, with noticeable difference between second carrier. One the other hand, JetBlue ranked first during year of 2005. Still, carriers with top 5 arrival delay rate are totally different for each year.
+
+##By cancellation code
+
+```{r}
+air0205_cancel <- air0205[which(air0205[ , "cancelled"] ==1), ]
+air0205_cancel_02 <- air0205_cancel[which(air0205_cancel[ , "year"] ==2002), ]
+air0205_cancel_05 <- air0205_cancel[which(air0205_cancel[ , "year"] ==2005), ]
+
+cancdind_05 = split(1:nrow(air0205_cancel_05), air0205_cancel_05[,"cancellationcode"])
+cd_cancel_05 <- foreach(inds = cancdind_05, .combine = cbind) %do% {
+  sum(air0205_cancel_05[inds, "cancelled"], na.rm = TRUE)/dim(air0205_cancel_05)[1]
+}
+cd_cancel_05 = t(cd_cancel_05)
+
+cd = as.data.frame(cbind(cd_cancel_05,cd= c(1:4)))
+barplot(cd$V1,col="lightblue",
+        xlab = "State",
+        ylab = "Cancellation Rate",
+        main = "Cancellation Rate vs. Reasons in 2005",
+        names.arg=c("Carrier","Weather","National Air System","Security"))
+
+```
+
+Since all cancellation codes (indicating cancellation reason) in 2002 raw flight data are unavailable, analysis for cancellation reason based on 2005 flight data was the only choice for the group. Cancelled flights were filtered out to see the percentage of cancellation due to each reason (NA records were omitted).
+
+As shown in the figure, we could see that the two main reasons for flight cancellation in 2005 were carrier and weather, while the percentage of carrier was slightly higher than weather. Approximately 20% of cancellation were due to national air system, and very few were due to security.
+
+
+## Logistic regression
+
+###2002 Logistic
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+lg_02<- bigglm.big.matrix( cancelled ~ dayofweek + month + origin + originstate + uniquecarrier, data = air02, family = binomial())
+summary(lg_02)$rsq
+```
+
+###2005 Logistic
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+lg_05<- bigglm.big.matrix( cancelled ~ dayofweek + month + origin + originstate, data = air05, family = binomial())
+summary(lg_05)$rsq
+```
+
+After exploring the data, we generally know the relationship between flight cancellation and other variables. Logistic regression was used for 2002 and 2005 respectively. All explored variables were included, such as month, day of week, origin airport, origin state, and carrier information. Since for some variables such as origin airport and carrier, there are too many levels, it"s time consuming to treat them as factor for regression. Therefore, these variables are still treated as numeric as in data preprocessing.
+
+After fitting logistic regression for 2002 and 2005 separately, the results demonstrated that the r-square for 2002 is 0.867, and the r-square for 2005 is 0.815, which means that the variables we selected could explain more than 80% of the variance for these two years. The r-square in 2002 is higher than in 2005, which means other factors not included in the model might have some influence on flight cancellation in 2005 rather in 2002.
+
+
+
+##Corrlation Between Arrival delays and other delays
+
+Several reasons for airline delays were recorded in the data, including carrier delay, national air system delay, weather delay, security delay, and late aircraft delay. Carrier delay is cause due to circumstances within the airline"s control (e.g. maintenance or crew problems, aircraft cleaning, baggage loading, fueling, etc.). Nasdelay are the delays within the control of the National Airspace System (NAS), including non-extreme weather conditions, airport operations, heavy traffic volume, air traffic control, etc. Security delay is caused by evacuation of a terminal or concourse, re-boarding of aircraft because of security breach, inoperative screening equipment and/or long lines in excess of 29 minutes at screening areas. Late aircraft delay is caused when a previous flight with same aircraft arrived late, causing the present flight to depart late. 
+
+```{r}
+# correlation between arrival delay and departure delays.
+x = air0205
+matrixCor <- x[,c(15:16,25:29)]
+Cor <- cor(matrixCor,use="pairwise.complete.obs")[2:7,1]
+```
+
+```{r}
+xnames = c("depdelay", "carrierdelay", "weatherdelay",
+           "nasdelay", "securitydelay", "lateairde")
+plot(Cor, type="h", xaxt = "n", 
+     main="Correlation between Arrival Delay and other delays",
+     ylab="Correlation Values", xlab="Different reasons", col = "blue")
+axis(1, at=1:6, labels=xnames)
+```
+
+A correlation among the reasons listed and arrival delay has been calculated.It is obviously noticeable that departure delay is the variable recording whether the flight departs late or on time. According to the figure, it is easily to tell that departure delays have strong positive correlations, then carrier delays and late aircraft delays have higher correlation with arrival delay. Reasons for these kind of delays with higher correlation would be addressed in the following sections.
+
+##Different delay rate
+
+```{r}
+# Number of flights per year.
+yearCount = integer(2)
+x = air0205
+yearCount[1] <-  sum(x[,"year"] == 2002, na.rm = TRUE)
+yearCount[2] <-  sum(x[,"year"] == 2005,na.rm = TRUE)
+
+# Arrival delay rate over years
+ArrdelayRateAnn = double(2)
+ArrdelayRateAnn[1] <-  sum((x[,"arrdelay"] > 0) & (x[,"year"] == 2002), 
+                            na.rm = TRUE)/yearCount[1]
+ArrdelayRateAnn[2] <-  sum((x[,"arrdelay"] > 0) & (x[,"year"] == 2005), 
+                            na.rm = TRUE)/yearCount[2]
+```
+
+```{r}
+# Different delay rate for each year.
+ArrdelayAnn = double(2)
+ArrdelayAnn[1] <-  sum((air02[,"arrdelay"] > 0), na.rm = TRUE)
+ArrdelayAnn[1] <-  sum((air05[,"arrdelay"] > 0), na.rm = TRUE)
+
+
+delayrate <- matrix(,nrow=2,ncol=0)
+# Depature delay rate over years
+DepdelayRateAnn = double(2)
+DepdelayRateAnn[1] <-  sum((x[,"depdelay"] > 0) & (x[,"year"] == 2002), 
+                            na.rm = TRUE)/dim(air02)[1]
+DepdelayRateAnn[2] <-  sum((x[,"depdelay"] > 0) & (x[,"year"] == 2005), 
+                            na.rm = TRUE)/dim(air05)[1]
+
+delayrate<-cbind(delayrate,DepdelayRateAnn)
+
+# Carrier delay rate over years
+CardelayRateAnn = double(2)
+CardelayRateAnn[1] <-  sum((x[,"carrierdelay"] > 0) & (x[,"year"] == 2002), 
+                            na.rm = TRUE)/dim(air02)[1]
+CardelayRateAnn[2] <-  sum((x[,"carrierdelay"] > 0) & (x[,"year"] == 2005), 
+                            na.rm = TRUE)/dim(air05)[1]
+
+delayrate<-cbind(delayrate,CardelayRateAnn)
+
+# Weather delay rate over years
+WeadelayRateAnn = double(2)
+WeadelayRateAnn[1] <-  sum((x[,"weatherdelay"] > 0) & (x[,"year"] == 2002), 
+                            na.rm = TRUE)/dim(air02)[1]
+WeadelayRateAnn[2] <-  sum((x[,"weatherdelay"] > 0) & (x[,"year"] == 2005), 
+                            na.rm = TRUE)/dim(air05)[1]
+
+delayrate<-cbind(delayrate,WeadelayRateAnn)
+
+# National air system delay rate over years
+NasdelayRateAnn = double(2)
+NasdelayRateAnn[1] <-  sum((x[,"nasdelay"] > 0) & (x[,"year"] == 2002), 
+                            na.rm = TRUE)/dim(air02)[1]
+NasdelayRateAnn[2] <-  sum((x[,"nasdelay"] > 0) & (x[,"year"] == 2005), 
+                            na.rm = TRUE)/dim(air05)[1]
+
+delayrate<-cbind(delayrate,NasdelayRateAnn)
+
+# Security delay rate over years
+SecdelayRateAnn = double(2)
+SecdelayRateAnn[1] <-  sum((x[,"securitydelay"] > 0) & (x[,"year"] == 2002), 
+                            na.rm = TRUE)/dim(air02)[1]
+SecdelayRateAnn[2] <-  sum((x[,"securitydelay"] > 0) & (x[,"year"] == 2005), 
+                            na.rm = TRUE)/dim(air05)[1]
+
+delayrate<-cbind(delayrate,SecdelayRateAnn)
+
+# Late Aircraft delay rate over years
+LadelayRateAnn = double(2)
+LadelayRateAnn[1] <-  sum((x[,"lateaircraftdelay"] > 0) & (x[,"year"] == 2002), 
+                            na.rm = TRUE)/dim(air02)[1]
+LadelayRateAnn[2] <-  sum((x[,"lateaircraftdelay"] > 0) & (x[,"year"] == 2005), 
+                            na.rm = TRUE)/dim(air05)[1]
+
+delayrate<-cbind(delayrate,LadelayRateAnn)
+```
+
+```{r}
+# Plot for annual delay rate caused by different reasons.
+colnames(delayrate) = c("depdelay","carrierdelay", "weatherdelay",
+           "nasdelay", "securitydelay", "lateaircraftdelay")
+barplot(delayrate[2,2:6], col="lightblue", beside=TRUE,
+        main="Different delay rate",
+        ylab="Delay rate", xlab="Delay reasons") #plot
+legend("bottomleft", legend = c("2005"), col = c("lightblue"), pch = 1)
+```
+
+The group has also investigated the percentage of different kind of delays for the year of 2005, since there"s no records for year of 2002. Only nasdelays happened more than 10% of the time within the year of 2005, then carrier delays and late aircraft delays occurred 9% of the time, which also indicated the carrier delays and late aircraft delays are worthy looking at, since nasdelays has no related variables provided in the data given. 
+
+##Arrival delay time range caused by different reasons
+
+The group looked into the value provided in all delay related columns, and found that values are actually offered in minutes, which drew the attention to break the delay time into bins. Delays within an hour are usually tolerable for most people. If the delay time is be more than 1 hour, less than 4 hours, which is like a half work day, or say that passengers have to have meals within the airport, then it is another level of tolerance. When the delay time extended to over 4 hours, less than 12 hours, then it is a length of a work day. Over 12 hours means at least a rest at the airport, which is annoying and really tired. These are the reasons the group has divided the delay time into these bins. The rate in the graph was calculated as the number of delays for that certain reason over the total number of arrival delays for that time range. 
+
+```{r}
+# Time ranges for arrival delay.
+Arrdelayrange = integer(4)
+Arrdelayrange[1] <-  sum((air05[,"arrdelay"] > 0) & (air05[,"arrdelay"] <= 60), na.rm = TRUE)
+Arrdelayrange[2] <-  sum((air05[,"arrdelay"] > 60) & (air05[,"arrdelay"] <= 240), na.rm = TRUE)
+Arrdelayrange[3] <-  sum((air05[,"arrdelay"] > 240) & (air05[,"arrdelay"] <= 720), na.rm = TRUE)
+Arrdelayrange[4] <-  sum((air05[,"arrdelay"] > 720), na.rm = TRUE)
+
+# Different delay rate with different delay time range (1-60, 60-240, 240-720, >720) for each year.
+delayrate05 <- matrix(, nrow=0, ncol=4)
+
+# Departure delay.
+DepdelayRateAnnSep = double(4)
+DepdelayRateAnnSep[1] <-  sum((air05[,"depdelay"] > 0) & (air05[,"depdelay"] <= 60),
+                              na.rm = TRUE)/Arrdelayrange[1]
+DepdelayRateAnnSep[2] <-  sum((air05[,"depdelay"] > 60) & (air05[,"depdelay"] <= 240),
+                              na.rm = TRUE)/Arrdelayrange[2]
+DepdelayRateAnnSep[3] <-  sum((air05[,"depdelay"] > 240) & (air05[,"depdelay"] <= 720),
+                              na.rm = TRUE)/Arrdelayrange[3]
+DepdelayRateAnnSep[4] <-  sum((air05[,"depdelay"] > 720), na.rm = TRUE)/Arrdelayrange[4]
+
+delayrate05<-rbind(delayrate05,DepdelayRateAnnSep)
+
+# Carrier delay.
+CardelayRateAnnSep = double(4)
+CardelayRateAnnSep[1] <-  sum((air05[,"carrierdelay"] > 0) & (air05[,"carrierdelay"] <= 60),
+                              na.rm = TRUE)/Arrdelayrange[1]
+CardelayRateAnnSep[2] <-  sum((air05[,"carrierdelay"] > 60) & (air05[,"carrierdelay"] <= 240),
+                              na.rm = TRUE)/Arrdelayrange[2]
+CardelayRateAnnSep[3] <-  sum((air05[,"carrierdelay"] > 240) & (air05[,"carrierdelay"] <= 720),
+                              na.rm = TRUE)/Arrdelayrange[3]
+CardelayRateAnnSep[4] <-  sum((air05[,"carrierdelay"] > 720), na.rm = TRUE)/Arrdelayrange[4]
+
+delayrate05<-rbind(delayrate05,CardelayRateAnnSep)
+
+# Weather delay.
+WeadelayRateAnnSep = double(4)
+WeadelayRateAnnSep[1] <-  sum((air05[,"weatherdelay"] > 0) & (air05[,"weatherdelay"] <= 60),
+                              na.rm = TRUE)/Arrdelayrange[1]
+WeadelayRateAnnSep[2] <-  sum((air05[,"weatherdelay"] > 60) & (air05[,"weatherdelay"] <= 240),
+                              na.rm = TRUE)/Arrdelayrange[2]
+WeadelayRateAnnSep[3] <-  sum((air05[,"weatherdelay"] > 240) & (air05[,"weatherdelay"] <= 720),
+                              na.rm = TRUE)/Arrdelayrange[3]
+WeadelayRateAnnSep[4] <-  sum((air05[,"weatherdelay"] > 720), na.rm = TRUE)/Arrdelayrange[4]
+
+delayrate05<-rbind(delayrate05,WeadelayRateAnnSep)
+
+# National Air System delay.
+NasdelayRateAnnSep = double(4)
+NasdelayRateAnnSep[1] <-  sum((air05[,"nasdelay"] > 0) & (air05[,"nasdelay"] <= 60),
+                              na.rm = TRUE)/Arrdelayrange[1]
+NasdelayRateAnnSep[2] <-  sum((air05[,"nasdelay"] > 60) & (air05[,"nasdelay"] <= 240),
+                              na.rm = TRUE)/Arrdelayrange[2]
+NasdelayRateAnnSep[3] <-  sum((air05[,"nasdelay"] > 240) & (air05[,"nasdelay"] <= 720),
+                              na.rm = TRUE)/Arrdelayrange[3]
+NasdelayRateAnnSep[4] <-  sum((air05[,"nasdelay"] > 720), na.rm = TRUE)/Arrdelayrange[4]
+
+delayrate05<-rbind(delayrate05,NasdelayRateAnnSep)
+
+# Security delay
+SecdelayRateAnnSep = double(4)
+DepdelayRateAnnSep[1] <-  sum((air05[,"securitydelay"] > 0) & (air05[,"securitydelay"] <= 60),
+                              na.rm = TRUE)/Arrdelayrange[1]
+SecdelayRateAnnSep[2] <-  sum((air05[,"securitydelay"] > 60) & (air05[,"securitydelay"] <= 240),
+                              na.rm = TRUE)/Arrdelayrange[2]
+SecdelayRateAnnSep[3] <-  sum((air05[,"securitydelay"] > 240) & (air05[,"securitydelay"] <= 720),
+                              na.rm = TRUE)/Arrdelayrange[3]
+SecdelayRateAnnSep[4] <-  sum((air05[,"securitydelay"] > 720), na.rm = TRUE)/Arrdelayrange[4]
+
+delayrate05<-rbind(delayrate05,SecdelayRateAnnSep)
+
+# Late aircraft delay.
+LadelayRateAnnSep = double(4)
+LadelayRateAnnSep[1] <-  sum((air05[,"lateaircraftdelay"] > 0) & (air05[,"lateaircraftdelay"] <= 60),
+                              na.rm = TRUE)/Arrdelayrange[1]
+LadelayRateAnnSep[2] <-  sum((air05[,"lateaircraftdelay"] > 60) & (air05[,"lateaircraftdelay"] <= 240),
+                              na.rm = TRUE)/Arrdelayrange[2]
+LadelayRateAnnSep[3] <-  sum((air05[,"lateaircraftdelay"] > 240) & (air05[,"lateaircraftdelay"] <= 720),
+                              na.rm = TRUE)/Arrdelayrange[3]
+LadelayRateAnnSep[4] <-  sum((air05[,"lateaircraftdelay"] > 720), na.rm = TRUE)/Arrdelayrange[4]
+
+delayrate05<-rbind(delayrate05,LadelayRateAnnSep)
+```
+
+```{r}
+# Plot for Arrival delay time range.
+colnames(delayrate05) = c("0-1h", "1-4h", "4-12h", "12h&over")
+barplot(delayrate05[2:6,],col=c("darkblue", "blue", "dodgerblue", "lightblue", "white"), beside=TRUE, 
+        main="Arrival delay time range caused by different reasons", xlab="Delay time")
+legend("topleft", legend = c("carrierdelay", "weatherdelay", "nasdelay",
+                                "securitydelay", "lateaircraftdelay"), 
+       col = c("darkblue", "blue", "dodgerblue", "lightblue", "white"), pch = 1)
+```
+
+The graph plotted the rate for each time range as y axis, and x axis as different time ranges. For the first 3 time bins, carrier delay, nasdelay and late aircraft delay donated between 70% to 80% of the delays. For delays over 12 hours, carrier delay contributed more than 60% of the delays, and weather delay here donated 1 around 10% of the delays. Weather might be a major reason for delays as people may think, but here, according to data and graph, only if the delay time is over 12 hours, then weather comes into the game.  
+
+The group has looked into the distribution for each single delay reason. Carrier delay has increasing trend as the time range increases. National Air System delays has been decreasing as the time range increases, which reflected the fact of air traffic operations that only keep aircrafts in waitlist for some time, and it would not be a long time. As late aircraft delay may be affected by both nasdelays and carrier delays, it is a close-to-normal distribution, just as shown in the graph.
+
+
+
+
+
+## Carrier vs Late Aircraft Delay
+```{r}
+drawMap(c("carrierdelay", "lateaircraftdelay"),
+        "uniquecarrier", FALSE,
+        c("Carrier", "99% Carrier Delay", "99% Late Aircraft Delay"),
+        "Carrier vs Late Aircraft Delay",
+        function(x) quantile(x, probs=0.99, na.rm=TRUE))
+```
+
+Following the definition above, we should expect the values to vary by carrier. From the above treemap, we can see that Alaska Airlines (AS) experiences one of the worst carrier delays, having the highest 99th percentile carrier delay of 122 minutes. This airline is followed by Atlantic Southeast Airlines (EV) (106 minutes), Northwest Airlines (NW) (91 minutes), Comair (OH) (81 minutes) and Skywest Airlines (OO) (78 minutes). On the other hand, Hawaiian Airlines (HA) experiences one of the less worse carrier delays, having the lowest 99th percentile carrier delay of 38 minutes. This airline is followed by Southwest Airlines (WN) (40 minutes), Independence Air (DH) (44 minutes), JetBlue Airways (B6) (44 minutes) and Frontier Airlines (F9) (45 minutes). If you are booking a flight and want to hedge against experiencing very long carrier delays, Hawaiian Airlines is probably your best bet and Alaska Airlines is probably your worst bet.
+ 
+ 
+Although this type of delay can be caused by various factors ranging from weather to heavy air traffic, we should expect the delays to vary by carrier. From the above treemap 1, we can see that AirTran Airways Corporation (FL) experiences one of the worst carrier delays, having the highest 99th percentile carrier delay of 163 minutes. This airline is followed by Independence Air (DH) (124 minutes), Alaska Airlines (AS) (117 minutes), JetBlue Airways (B6) (115 minutes) and United Airlines (UA) (111 minutes). Note that AirTran Airways, Independence Air and JetBlue Airways had one of the less worse Carrier Delays. On the other hand, Comair (OH) experiences no carrier delay even in the worst 1% of times, having the lowest 99th percentile carrier delay of 0 minutes. This airline is followed by Hawaiian Airlines (HA) (15 minutes), Atlantic Southeast Airlines (EV) (47 minutes), Skywest Airlines (OO) (54 minutes), Frontier Airlines (F9) (58 minutes), Northwest Airlines (NW) (60 minutes) and America West Airlines (HP) (60 minutes). Note that Comair, Atlantic Southeast Airlines, Skywest Airlines, Northwest Airlines and America West Airlines had one of the worst Carrier Delays. If you are booking a flight (which you know has a connecting flight before) and want to hedge against experiencing very long late aircraft delays, Comair is probably your best bet and AirTran Airways is probably your worst bet.
+
+
+## Carrier vs Late Aircraft Delay
+```{r}
+drawMap(c("carrierdelay", "lateaircraftdelay"),
+        "planeyear", TRUE,
+        c("Year Manufactured", "99% Carrier Delay", "99% Late Aircraft Delay"),
+        "Carrier vs Late Aircraft Delay",
+        function(x) quantile(x, probs=0.99, na.rm=TRUE))
+```
+
+From the treemap above, we see that carrier delay also varies by the year in which the aircraft was manufactured. Earlier years (1960s and 1970s) experience a much higher 99th percentile carrier delay (83 and 91 minutes respectively) than the same during later years (averaging ~70 minutes). This result might imply that older aircrafts require more maintenance and hence, experience a higher carrier delay than newer aircrafts do.
+
+From the treemap above, we see that late aircraft delay also varies by the year in which the aircraft was manufactured. Earlier years (1950s, 1960s and 1970s) experience a much lower 99th percentile carrier delay (72, 58 and 71 minutes respectively) than the same during later years (averaging ~90 minutes). As opposed to newer aircrafts, older aircrafts require more maintenance, so they might not be used back-to-back consecutively for multiple flights and experience a lower aircraft delay than newer aircrafts do.
+
+
+
+## Delay by Engine Type
+```{r, warning=FALSE,message = FALSE}
+# data changes for generating heatmap
+air0205[air0205[,"planeenginetype"]==1,"planeenginetype"] <- 3
+air0205[air0205[,"planeenginetype"]==2,"planeenginetype"] <- NA
+
+drawHeatMap(c("carrierdelay", "depdelay", "arrdelay", "lateaircraftdelay"),
+        "planeenginetype",
+        c("Plane Engine Type", "99% Carrier Delay", "99% Departure Delay",
+          "99% Arrival Delay", "99% Late Aircraft Delay"),
+        "Delay by Engine Type",
+        function(x) quantile(x, probs=0.99, na.rm=TRUE),
+        "heatmap99.png")
+```
+
+From the heatmap 1 above, we see that carrier delay does not vary a lot by engine type. But "turbo-shaft" engines have significantly higher delays than the other engines with a 99th percentile carrier delay of 87 minutes. Turbo-shaft engines are mostly used in helicopters. Since they have gear systems that can be complex and might break down, aircrafts with turbo-shaft engines might require more maintenance and hence, have a higher carrier delay. The heatmap 2 showing 99.99th percentile of late aircraft delay shows that "turbo-prop" engines have significantly lower carrier delays than the other engines, with a 99th percentile carrier delay of 433 minutes. This result might be indicative of the fact that turbo-prop engines are fuel efficient and regarded as the most efficient engine at mid-range speed.
+
+From the heatmap 1 above, we see that "turbo-prop" engines have significantly lower late aircraft delays than the other engines with a 99th percentile carrier delay of 50 minutes. Turbo-prop engines are known to be very fuel efficient and most efficient at mid-range speed. Aircrafts that use turbo-prop engines might have a lower late aircraft delay because of this reason. The heatmap 2 showing 99.99th percentile of late aircraft delay also implies that "turbo-prop" engines have significantly lower late aircraft delays than the other engines with a 99th percentile late aircraft delay of 230 minutes.
+
+## Delay by Engine Type
+```{r, warning=FALSE,message = FALSE}
+drawHeatMap(c("carrierdelay", "depdelay", "arrdelay", "lateaircraftdelay"),
+            "planeenginetype",
+            c("Plane Engine Type", "99.99% Carrier Delay", "99.99% Departure Delay",
+              "99.99% Arrival Delay", "99.99% Late Aircraft Delay"),
+            "Delay by Engine Type",
+            function(x) quantile(x, probs=0.9999, na.rm=TRUE),
+            "heatmap9999.png")
+```
+
+The heatmap displaying 99.99th percentile delays, highlights the contrast between "reciprocating" (piston) engines and "turbo-prop" engines. Piston engines have the highest 99.99th percentile arrival and departure delay, whereas turbo-prop engines have the lowest 99.99th percentile arrival and departure delay. This is an indication of the superiority of turbo-prop engines over piston engines, a fact which is well established in the airline industry. Turbo-prop engines have far fewer moving parts and offer greater reliability than piston engines. You can generally log more hours on turbo-prop before bringing it in for inspection. The power of a turbine engine almost always allows turboprop aircraft to travel at higher speeds than piston aircraft, minimizing the delay.
+
+## Stream Graph
+```{r}
+drawStreamGraph(c("carrierdelay"),
+                c("planeyear", "uniquecarrier"),
+                c("Year", "Carrier", "Carrier Delay"),
+                function(x) quantile(x, probs=0.99, na.rm=TRUE))
+```
+
+From the stream graph, we can see how the worst carrier delays (99th percentile) vary by carrier and year the plane was manufactured. We see that carriers like Alaska Airlines (AS), Atlantic Southeast Airlines (EV) and Northwest Airlines (NW) had lower 99th percentile carrier delays for planes manufactured in older years. For example, Alaska Airlines which had an overall 99th percentile carrier delay of 122 minutes, had a 99th percentile carrier delay of ~155 minutes for planes manufactured in 1990. As we moved to newer planes, this number gradually decreased to 105 minutes for planes manufactured in 2000. Another interesting observation is that carriers like Hawaiian Airlines (HA), Independence Air (DH), JetBlue Airways (B6) and Frontier Airlines (F9) that had some of the lowest 99th percentile carrier delays, mostly used newer planes that were manufactured in 2000 or later. For example, JetBlue Airways, that had an overall 99th percentile carrier delay of 44 minutes only used planes manufactured after 1999.
+
+
+#Appendix
+
+GROUP MEMBER CONTRIBUTIONS
+
+Donghan
+A. Number of flights analysis for 2002 and 2005:
+1. By month
+2. By day of week
+3. By origin airport (top 5)
+4. By origin state (top 5)
+5. By carrier (top 5)
+B. Mering each individual works to final group project.
+
+
+Lijun
+A. Cancellation Rate analysis for 2002 and 2005:
+	1. By month
+	2. By day of week
+	3. By origin airport (top 5)
+	4. By origin state (top 5)
+	5. By carrier (top 5)
+	6. By cancellation reason
+B. Logistic model for cancellation prediction
+
+
+
+Dilin
+Delay related analysis
+Correlation among delays
+Arrival delay rate for each year:
+1. Monthly
+2. Day of week
+3. Origin airport (top5)
+4. Origin state (top5)
+5. Carrier (top 5)
+Frequency in bins(time ranges) for different delay reasons. 
+
+
+
+Saumil
+Following analysis was done:
+1. Carrier, Late Aircraft Delay Analysis (using 99th and 99.99th percentile values)
+	A. By Carrier (Treemap)
+	B. By Plane Year (Treemap)
+	C. By Engine Types (Heatmap)
+	D. By Carrier and Plane Year (Carrier Delay only) (Stream graph)
+2. Arrival, Departure Delay Analysis (using 99th and 99.99th percentile values)
+	A. By Engine Types (Heatmap)
+3. Cancellation/Diversion Rate Analysis
+	A. By Plane Year (Treemap)
+
+I also performed data pre-processing and combining tasks, which are described in detail under the "Data Processing" section above.
+
+#REFERENCES
+
+https://www.bts.gov/explore-topics-and-geography/topics/airline-time-performance-and-causes-flight-delays
+
+http://www.shorelineaviation.net/news---events/bid/50442/Piston-Engine-Aircraft-vs-Turboprop-Engine-Aircraft
+
+http://www.boldmethod.com/learn-to-fly/systems/the-4-types-of-turbine-engines/
+
+http://www.traveller.com.au/major-airlines-with-the-oldest-fleet-are-older-planes-less-reliable-to-fly-gxnsmn
+
+http://aspmhelp.faa.gov/index.php/Types_of_Delay#NAS_Delay
+

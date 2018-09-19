@@ -1,0 +1,99 @@
+---- Read Airline Data
+
+-- Create Airline Data Table schema
+DROP TABLE IF EXISTS airlineData;
+
+CREATE TABLE airlineData (
+-- AirlineData0205.csv variables
+  Year STRING, Month STRING, DayOfMonth STRING,
+  DayOfWeek STRING, DepTime STRING, CRSDepTime STRING,
+  ArrTime STRING, CRSArrTime STRING, UniqueCarrier STRING,
+  FlightNum STRING, TailNum STRING, ActualElapsedTime INT,
+  CRSElapsedTime INT, AirTime INT, ArrDelay INT,
+  DepDelay INT, Origin STRING, Dest STRING,
+  Distance INT, TaxiIn INT, TaxiOut INT,
+  Cancelled STRING, CancellationCode STRING, Diverted STRING,
+  CarrierDelay INT, WeatherDelay INT, NASDelay INT,
+  SecurityDelay INT, LateAircraftDelay INT
+) ROW FORMAT DELIMITED
+  FIELDS TERMINATED BY ','
+  TBLPROPERTIES ("skip.header.line.count"="1");
+
+-- Populate Airline Data
+LOAD DATA LOCAL INPATH 'AirlineData0205.csv'
+OVERWRITE INTO TABLE airlineData;
+
+---- Read Airports Data
+
+-- Create Airports Table schema
+DROP TABLE IF EXISTS airports;
+
+CREATE TABLE airports (
+  iata STRING, airport STRING, city STRING, state STRING,
+  country STRING, lat STRING, long STRING
+) ROW FORMAT DELIMITED
+  FIELDS TERMINATED BY ',' ESCAPED BY '/'
+  TBLPROPERTIES ("skip.header.line.count"="1");
+
+-- Populate airports data
+LOAD DATA LOCAL INPATH 'airports_mod.csv'
+OVERWRITE INTO TABLE airports;
+
+---- Read Carriers Data
+
+-- Create Carriers Table schema
+DROP TABLE IF EXISTS carriers;
+
+CREATE TABLE carriers (
+  code STRING, description STRING
+) ROW FORMAT DELIMITED
+  FIELDS TERMINATED BY ',' ESCAPED BY '/'
+  TBLPROPERTIES ("skip.header.line.count"="1");
+
+-- Populate carriers data
+LOAD DATA LOCAL INPATH 'carriers_mod.csv'
+OVERWRITE INTO TABLE carriers;
+
+---- Read plane data
+
+-- Create Plane Table schema
+DROP TABLE IF EXISTS plane;
+
+CREATE TABLE plane (
+  tailnum STRING, type STRING, manufacturer STRING, issue_date STRING,
+  model STRING, status STRING, aircraft_type STRING, engine_type STRING, year STRING
+) ROW FORMAT DELIMITED
+  FIELDS TERMINATED BY ',' ESCAPED BY '/'
+  TBLPROPERTIES ("skip.header.line.count"="1");
+
+-- Populate plane data
+LOAD DATA LOCAL INPATH 'plane-data_mod.csv'
+OVERWRITE INTO TABLE plane;
+
+---- Combine airlineData, airports, carriers, and plane data sets
+DROP TABLE IF EXISTS airlineDataCombined;
+
+CREATE TABLE airlineDataCombined AS
+  SELECT
+    d.*,
+    a1.airport AS OriginAirport, a1.city AS OriginCity, a1.state AS OriginState,
+    a1.country AS OriginCountry, a1.lat AS OriginLat, a1.long AS OriginLong,
+    a2.airport AS DestAirport, a2.city AS DestCity, a2.state AS DestState,
+    a2.country AS DestCountry, a2.lat AS DestLat, a2.long AS DestLong,
+    c.description AS UniqueCarrierDescription,
+    p.type AS PlaneType, p.manufacturer AS PlaneManufacturer, p.issue_date AS PlaneIssueDate,
+    p.model AS PlaneModel, p.status AS PlaneStatus, p.aircraft_type AS PlaneAircraftType,
+    p.engine_type AS PlaneEngineType, p.year AS PlaneYear
+  FROM airlineData d
+  LEFT OUTER JOIN airports a1
+    ON (CONCAT('"', d.Origin, '"')=a1.iata)
+  LEFT OUTER JOIN airports a2
+    ON (CONCAT('"', d.Dest, '"')=a2.iata)
+  LEFT OUTER JOIN carriers c
+    ON (CONCAT('"', d.UniqueCarrier, '"')=c.code)
+  LEFT OUTER JOIN plane p
+    ON (CONCAT('"', d.TailNum, '"')=p.tailnum);
+
+-- Output combined data set
+SET hive.cli.print.header=TRUE;
+SELECT * FROM airlineDataCombined;
